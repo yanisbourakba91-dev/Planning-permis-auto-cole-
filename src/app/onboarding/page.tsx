@@ -26,29 +26,28 @@ function OnboardingContent() {
       pollRef.current = true;
       setSuccess("Paiement confirmé ! Activation en cours...");
 
-      let attempts = 0;
-      const maxAttempts = 10;
+      const sessionId = searchParams.get("session_id");
 
-      const poll = () => {
-        attempts++;
-        update().then((updated) => {
-          const status = (updated?.user as { status?: string } | null)?.status;
-          if (status === "ACTIVE" || attempts >= maxAttempts) {
-            setSuccess("Compte activé ! Redirection en cours...");
-            router.push("/dashboard");
-          } else {
-            setTimeout(poll, 3000);
-          }
-        }).catch(() => {
-          if (attempts >= maxAttempts) {
-            router.push("/dashboard");
-          } else {
-            setTimeout(poll, 3000);
-          }
-        });
+      const activate = () => {
+        fetch("/api/stripe/activate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId }),
+        })
+          .then((r) => r.json())
+          .then(async (data) => {
+            if (data.activated) {
+              await update();
+              setSuccess("Compte activé ! Redirection en cours...");
+              router.push("/dashboard");
+            } else {
+              setTimeout(activate, 3000);
+            }
+          })
+          .catch(() => setTimeout(activate, 3000));
       };
 
-      setTimeout(poll, 3000);
+      setTimeout(activate, 2000);
     }
     if (searchParams.get("canceled") === "true") {
       setError("Paiement annulé. Vous pouvez réessayer.");
