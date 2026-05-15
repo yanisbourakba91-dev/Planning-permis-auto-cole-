@@ -40,4 +40,24 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       },
     }),
   ],
+  callbacks: {
+    ...authConfig.callbacks,
+    async jwt({ token, user, trigger }) {
+      if (user) {
+        token.id = user.id;
+        token.role = (user as { role?: string }).role;
+        token.status = (user as { status?: string }).status;
+        token.schoolId = (user as { schoolId?: string | null }).schoolId;
+        token.schoolName = (user as { schoolName?: string | null }).schoolName;
+      }
+      if (trigger === "update" && token.id) {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: token.id as string },
+          select: { status: true },
+        });
+        if (dbUser) token.status = dbUser.status;
+      }
+      return token;
+    },
+  },
 });
