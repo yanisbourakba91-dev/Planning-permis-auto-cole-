@@ -13,10 +13,24 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon");
 
-  const token = await getToken({
-    req: request,
-    secret: process.env.NEXTAUTH_SECRET,
-  });
+  // Si NEXTAUTH_SECRET absent → laisser passer, les pages se protègent elles-mêmes
+  if (!process.env.NEXTAUTH_SECRET) {
+    return NextResponse.next();
+  }
+
+  let token = null;
+  try {
+    token = await getToken({
+      req: request,
+      secret: process.env.NEXTAUTH_SECRET,
+    });
+  } catch {
+    // En cas d'erreur JWT → traiter comme non-authentifié
+    if (!isPublicPath) {
+      return NextResponse.redirect(new URL("/auth/login", request.url));
+    }
+    return NextResponse.next();
+  }
 
   // Non authentifié → rediriger vers login sauf routes publiques
   if (!token && !isPublicPath) {
