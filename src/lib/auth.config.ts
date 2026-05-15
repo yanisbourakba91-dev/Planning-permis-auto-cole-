@@ -5,7 +5,7 @@ export const authConfig: NextAuthConfig = {
   callbacks: {
     authorized({ auth, request: { nextUrl } }) {
       const { pathname } = nextUrl;
-      const token = auth;
+      const user = auth?.user as { role?: string; status?: string } | undefined;
 
       const isPublicPath =
         pathname === "/" ||
@@ -16,24 +16,20 @@ export const authConfig: NextAuthConfig = {
         pathname.startsWith("/_next") ||
         pathname.startsWith("/favicon");
 
-      if (!token && !isPublicPath) {
+      if (!auth && !isPublicPath) {
         return Response.redirect(new URL("/auth/login", nextUrl));
       }
 
-      if (
-        token &&
-        (pathname === "/auth/login" || pathname === "/auth/register")
-      ) {
-        const status = (token as { status?: string }).status;
-        if (status === "PENDING") {
+      if (auth && (pathname === "/auth/login" || pathname === "/auth/register")) {
+        if (user?.status === "PENDING") {
           return Response.redirect(new URL("/onboarding", nextUrl));
         }
         return Response.redirect(new URL("/dashboard", nextUrl));
       }
 
       if (
-        token &&
-        (token as { status?: string }).status === "PENDING" &&
+        auth &&
+        user?.status === "PENDING" &&
         pathname !== "/onboarding" &&
         !pathname.startsWith("/api") &&
         !isPublicPath
@@ -41,10 +37,7 @@ export const authConfig: NextAuthConfig = {
         return Response.redirect(new URL("/onboarding", nextUrl));
       }
 
-      if (
-        pathname.startsWith("/admin") &&
-        (token as { role?: string })?.role !== "ADMIN"
-      ) {
+      if (pathname.startsWith("/admin") && user?.role !== "ADMIN") {
         return Response.redirect(new URL("/dashboard", nextUrl));
       }
 
