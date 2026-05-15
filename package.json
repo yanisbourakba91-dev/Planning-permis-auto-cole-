@@ -26,6 +26,7 @@
     "@hookform/resolvers": "^5.2.2",
     "@prisma/client": "^5.22.0",
     "@stripe/stripe-js": "^9.5.0",
+    "@vercel/next": "^4.17.1",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
