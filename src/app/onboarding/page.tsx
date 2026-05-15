@@ -27,8 +27,11 @@ function OnboardingContent() {
       setSuccess("Paiement confirmé ! Activation en cours...");
 
       const sessionId = searchParams.get("session_id");
+      let attempts = 0;
+      const maxAttempts = 8;
 
       const activate = () => {
+        attempts++;
         fetch("/api/stripe/activate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -37,14 +40,24 @@ function OnboardingContent() {
           .then((r) => r.json())
           .then(async (data) => {
             if (data.activated) {
-              await update();
               setSuccess("Compte activé ! Redirection en cours...");
-              router.push("/dashboard");
-            } else {
+              await update();
+              window.location.href = "/dashboard";
+            } else if (attempts < maxAttempts) {
               setTimeout(activate, 3000);
+            } else {
+              // Forcer la redirection même si l'activation n'est pas confirmée
+              await update();
+              window.location.href = "/dashboard";
             }
           })
-          .catch(() => setTimeout(activate, 3000));
+          .catch(() => {
+            if (attempts < maxAttempts) {
+              setTimeout(activate, 3000);
+            } else {
+              window.location.href = "/dashboard";
+            }
+          });
       };
 
       setTimeout(activate, 2000);
