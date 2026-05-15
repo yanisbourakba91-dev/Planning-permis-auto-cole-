@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { GraduationCap, CreditCard, KeyRound, CheckCircle, Loader2 } from "lucide-react";
@@ -19,33 +19,42 @@ function OnboardingContent() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const pollRef = useRef(false);
+
   useEffect(() => {
-    if (searchParams.get("success") === "true") {
+    if (searchParams.get("success") === "true" && !pollRef.current) {
+      pollRef.current = true;
       setSuccess("Paiement confirmé ! Activation en cours...");
 
       let attempts = 0;
-      const maxAttempts = 15;
+      const maxAttempts = 10;
 
-      const poll = async () => {
+      const poll = () => {
         attempts++;
-        const updated = await update();
-        if ((updated?.user as { status?: string })?.status === "ACTIVE") {
-          setSuccess("Compte activé ! Redirection en cours...");
-          router.push("/dashboard");
-        } else if (attempts < maxAttempts) {
-          setTimeout(poll, 2000);
-        } else {
-          setSuccess("Compte activé ! Redirection en cours...");
-          router.push("/dashboard");
-        }
+        update().then((updated) => {
+          const status = (updated?.user as { status?: string } | null)?.status;
+          if (status === "ACTIVE" || attempts >= maxAttempts) {
+            setSuccess("Compte activé ! Redirection en cours...");
+            router.push("/dashboard");
+          } else {
+            setTimeout(poll, 3000);
+          }
+        }).catch(() => {
+          if (attempts >= maxAttempts) {
+            router.push("/dashboard");
+          } else {
+            setTimeout(poll, 3000);
+          }
+        });
       };
 
-      setTimeout(poll, 2000);
+      setTimeout(poll, 3000);
     }
     if (searchParams.get("canceled") === "true") {
       setError("Paiement annulé. Vous pouvez réessayer.");
     }
-  }, [searchParams, update, router]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleStripePayment() {
     setStripeLoading(true);
