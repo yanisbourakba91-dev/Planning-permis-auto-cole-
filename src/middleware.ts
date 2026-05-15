@@ -1,8 +1,6 @@
 import { getToken } from "next-auth/jwt";
 import { NextRequest, NextResponse } from "next/server";
 
-export const runtime = "nodejs";
-
 export default async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
