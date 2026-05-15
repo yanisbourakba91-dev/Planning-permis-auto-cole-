@@ -10,7 +10,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
     }
 
-    const appUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || `https://${req.headers.get("host")}`;
+    const proto = req.headers.get("x-forwarded-proto") ?? "https";
+    const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
+    const appUrl = host ? `${proto}://${host}` : (process.env.NEXTAUTH_URL ?? "https://planning-permis-auto-cole.vercel.app");
+    console.log("Stripe checkout appUrl:", appUrl);
 
     const stripeSession = await stripe.checkout.sessions.create({
       mode: "subscription",
