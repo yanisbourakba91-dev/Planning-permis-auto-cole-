@@ -27,37 +27,31 @@ function OnboardingContent() {
       setSuccess("Paiement confirmé ! Activation en cours...");
 
       const sessionId = searchParams.get("session_id");
-      let attempts = 0;
-      const maxAttempts = 8;
 
-      const activate = () => {
-        attempts++;
-        fetch("/api/stripe/activate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId }),
+      fetch("/api/stripe/activate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      })
+        .then(() => {
+          setSuccess("Compte activé ! Reconnexion en cours...");
+          // Déconnexion + redirection vers login pour obtenir un JWT propre avec statut ACTIVE
+          setTimeout(() => {
+            signOut({ callbackUrl: "/auth/login?activated=true" });
+          }, 1000);
         })
-          .then((r) => r.json())
-          .then(async (data) => {
-            if (data.activated) {
-              setSuccess("Compte activé ! Redirection en cours...");
-              await update();
-              window.location.href = "/dashboard";
-            } else if (attempts < maxAttempts) {
-              setTimeout(activate, 3000);
-            } else {
-              // Forcer la redirection même si l'activation n'est pas confirmée
-              await update();
-              window.location.href = "/dashboard";
-            }
-          })
-          .catch(() => {
-            if (attempts < maxAttempts) {
-              setTimeout(activate, 3000);
-            } else {
-              window.location.href = "/dashboard";
-            }
-          });
+        .catch(() => {
+          setSuccess("Compte activé ! Reconnexion en cours...");
+          setTimeout(() => {
+            signOut({ callbackUrl: "/auth/login?activated=true" });
+          }, 1000);
+        });
+    }
+    if (searchParams.get("canceled") === "true") {
+      setError("Paiement annulé. Vous pouvez réessayer.");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
       };
 
       setTimeout(activate, 2000);
