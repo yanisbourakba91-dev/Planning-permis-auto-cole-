@@ -1,35 +1,55 @@
-import { auth } from "@/lib/auth";
-import { NextResponse } from "next/server";
+import { getToken } from "next-auth/jwt";
+import { NextRequest, NextResponse } from "next/server";
 
-export default auth((req) => {
-  const { pathname } = req.nextUrl;
-  const session = req.auth;
+export async function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
 
-  const publicRoutes = ["/", "/auth/login", "/auth/register"];
-  const isPublic = publicRoutes.some((r) => pathname === r || pathname.startsWith("/api/stripe/webhook") || pathname.startsWith("/api/auth"));
+  const isPublicPath =
+    pathname === "/" ||
+    pathname === "/auth/login" ||
+    pathname === "/auth/register" ||
+    pathname.startsWith("/api/stripe/webhook") ||
+    pathname.startsWith("/api/auth") ||
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/favicon");
 
-  if (!session && !isPublic) {
-    return NextResponse.redirect(new URL("/auth/login", req.url));
+  const token = await getToken({
+    req: request,
+    secret: process.env.NEXTAUTH_SECRET,
+  });
+
+  // Non authentifié → rediriger vers login sauf routes publiques
+  if (!token && !isPublicPath) {
+    return NextResponse.redirect(new URL("/auth/login", request.url));
   }
 
-  if (session && (pathname === "/auth/login" || pathname === "/auth/register")) {
-    if (session.user.status === "PENDING") {
-      return NextResponse.redirect(new URL("/onboarding", req.url));
+  // Authentifié sur login/register → rediriger selon statut
+  if (token && (pathname === "/auth/login" || pathname === "/auth/register")) {
+    if (token.status === "PENDING") {
+      return NextResponse.redirect(new URL("/onboarding", request.url));
     }
-    return NextResponse.redirect(new URL("/dashboard", req.url));
+    return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
-  if (session && session.user.status === "PENDING" && pathname !== "/onboarding" && !pathname.startsWith("/api") && !isPublic) {
-    return NextResponse.redirect(new URL("/onboarding", req.url));
+  // Compte en attente → forcer l'onboarding
+  if (
+    token &&
+    token.status === "PENDING" &&
+    pathname !== "/onboarding" &&
+    !pathname.startsWith("/api") &&
+    !isPublicPath
+  ) {
+    return NextResponse.redirect(new URL("/onboarding", request.url));
   }
 
-  if (pathname.startsWith("/admin") && session?.user.role !== "ADMIN") {
-    return NextResponse.redirect(new URL("/dashboard", req.url));
+  // Routes admin réservées à l'admin
+  if (pathname.startsWith("/admin") && token?.role !== "ADMIN") {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
   return NextResponse.next();
-});
+}
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|public).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|public/).*)"],
 };
