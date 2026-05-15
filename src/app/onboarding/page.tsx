@@ -21,10 +21,26 @@ function OnboardingContent() {
 
   useEffect(() => {
     if (searchParams.get("success") === "true") {
-      setSuccess("Paiement confirmé ! Votre compte est maintenant actif.");
-      update().then(() => {
-        setTimeout(() => router.push("/dashboard"), 2000);
-      });
+      setSuccess("Paiement confirmé ! Activation en cours...");
+
+      let attempts = 0;
+      const maxAttempts = 15;
+
+      const poll = async () => {
+        attempts++;
+        const updated = await update();
+        if ((updated?.user as { status?: string })?.status === "ACTIVE") {
+          setSuccess("Compte activé ! Redirection en cours...");
+          router.push("/dashboard");
+        } else if (attempts < maxAttempts) {
+          setTimeout(poll, 2000);
+        } else {
+          setSuccess("Compte activé ! Redirection en cours...");
+          router.push("/dashboard");
+        }
+      };
+
+      setTimeout(poll, 2000);
     }
     if (searchParams.get("canceled") === "true") {
       setError("Paiement annulé. Vous pouvez réessayer.");
