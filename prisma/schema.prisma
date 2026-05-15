@@ -1,0 +1,121 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  SCHOOL
+}
+
+enum AccountStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+model User {
+  id            String        @id @default(cuid())
+  email         String        @unique
+  password      String
+  role          Role          @default(SCHOOL)
+  status        AccountStatus @default(PENDING)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  school        School?
+  accessKeyUsed AccessKey?    @relation("UsedBy")
+  subscription  Subscription?
+}
+
+model School {
+  id          String   @id @default(cuid())
+  name        String
+  address     String?
+  phone       String?
+  userId      String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  students    Student[]
+  placements  ExamPlacement[]
+  examMonths  ExamMonth[]
+}
+
+model Student {
+  id              String    @id @default(cuid())
+  firstName       String
+  lastName        String
+  email           String?
+  phone           String?
+  drivingHours    Float     @default(0)
+  lastDrivingDate DateTime?
+  notes           String?
+  schoolId        String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  school          School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  placements      ExamPlacement[]
+}
+
+model ExamPlacement {
+  id            String   @id @default(cuid())
+  date          DateTime
+  time          String
+  instructor    String
+  examCenter    String
+  notes         String?
+  studentId     String
+  schoolId      String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  student       Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  school        School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+}
+
+model ExamMonth {
+  id          String   @id @default(cuid())
+  year        Int
+  month       Int
+  totalSlots  Int      @default(0)
+  usedSlots   Int      @default(0)
+  schoolId    String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  school      School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, year, month])
+}
+
+model AccessKey {
+  id          String    @id @default(cuid())
+  key         String    @unique @default(cuid())
+  used        Boolean   @default(false)
+  usedById    String?   @unique
+  createdAt   DateTime  @default(now())
+  usedAt      DateTime?
+  note        String?
+
+  usedBy      User?     @relation("UsedBy", fields: [usedById], references: [id])
+}
+
+model Subscription {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  stripeCustomerId     String?
+  stripeSessionId      String?
+  stripePriceId        String?
+  status               String   @default("inactive")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
