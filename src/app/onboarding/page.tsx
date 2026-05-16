@@ -52,15 +52,6 @@ function OnboardingContent() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-      };
-
-      setTimeout(activate, 2000);
-    }
-    if (searchParams.get("canceled") === "true") {
-      setError("Paiement annulé. Vous pouvez réessayer.");
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   async function handleStripePayment() {
     setStripeLoading(true);
