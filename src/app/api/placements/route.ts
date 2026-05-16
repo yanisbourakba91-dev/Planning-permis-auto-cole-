@@ -7,8 +7,8 @@ const placementSchema = z.object({
   studentId: z.string().min(1, "Élève requis"),
   date: z.string().min(1, "Date requise"),
   time: z.string().min(1, "Heure requise"),
-  instructor: z.string().min(1, "Moniteur requis"),
-  examCenter: z.string().min(1, "Centre d'examen requis"),
+  instructor: z.string().default(""),
+  examCenter: z.string().default(""),
   notes: z.string().optional(),
 });
 
