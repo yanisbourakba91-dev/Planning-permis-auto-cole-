@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
 const studentSchema = z.object({
-  firstName: z.string().min(1, "Prénom requis"),
+  firstName: z.string().default(""),
   lastName: z.string().min(1, "Nom requis"),
   email: z.string().email("Email invalide").optional().or(z.literal("")),
   phone: z.string().optional(),
