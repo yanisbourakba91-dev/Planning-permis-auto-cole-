@@ -2,7 +2,6 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import { AppLayout } from "@/components/layout/app-layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Users, CalendarDays, CheckCircle, Clock, TrendingUp } from "lucide-react";
 import { formatDate, getMonthName } from "@/lib/utils";
@@ -39,146 +38,96 @@ export default async function DashboardPage() {
     ? Math.max(0, currentMonthData.totalSlots - currentMonthData.usedSlots)
     : null;
 
+  const stats = [
+    { label: "Élèves inscrits", value: studentCount, icon: Users, colorBg: "bg-blue-50 dark:bg-blue-900/20", iconColor: "text-blue-500" },
+    { label: "Examens à venir", value: upcomingPlacements.length, icon: CalendarDays, colorBg: "bg-orange-50 dark:bg-orange-900/20", iconColor: "text-orange-500" },
+    { label: "Places disponibles", value: availableSlots !== null ? availableSlots : "—", sub: getMonthName(currentMonth), icon: CheckCircle, colorBg: "bg-green-50 dark:bg-green-900/20", iconColor: "text-green-500" },
+    { label: "Places occupées", value: currentMonthData?.usedSlots ?? 0, sub: `sur ${currentMonthData?.totalSlots ?? 0}`, icon: TrendingUp, colorBg: "bg-purple-50 dark:bg-purple-900/20", iconColor: "text-purple-500" },
+  ];
+
   return (
     <AppLayout title="Tableau de bord" role={session.user.role} schoolName={session.user.schoolName}>
       <div className="space-y-6">
-        {/* Stats */}
+        {/* Stats grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
+          {stats.map(({ label, value, sub, icon: Icon, colorBg, iconColor }) => (
+            <div key={label} className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 p-5">
+              <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Élèves inscrits</p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white mt-1">{studentCount}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">{label}</p>
+                  <p className="text-3xl font-bold text-gray-900 dark:text-white">{value}</p>
+                  {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
                 </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900/30">
-                  <Users className="h-6 w-6 text-blue-600" />
+                <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${colorBg}`}>
+                  <Icon className={`h-5 w-5 ${iconColor}`} />
                 </div>
               </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Examens à venir</p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white mt-1">
-                    {upcomingPlacements.length}
-                  </p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100 dark:bg-orange-900/30">
-                  <CalendarDays className="h-6 w-6 text-orange-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Places disponibles</p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white mt-1">
-                    {availableSlots !== null ? availableSlots : "—"}
-                  </p>
-                  <p className="text-xs text-gray-400 mt-0.5">{getMonthName(currentMonth)}</p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-green-100 dark:bg-green-900/30">
-                  <CheckCircle className="h-6 w-6 text-green-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Places occupées</p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white mt-1">
-                    {currentMonthData?.usedSlots ?? 0}
-                  </p>
-                  <p className="text-xs text-gray-400 mt-0.5">sur {currentMonthData?.totalSlots ?? 0}</p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-purple-100 dark:bg-purple-900/30">
-                  <TrendingUp className="h-6 w-6 text-purple-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+            </div>
+          ))}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Upcoming exams */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base">Prochains examens</CardTitle>
-              <Link href="/calendrier" className="text-sm text-blue-600 hover:underline">
-                Voir tout
-              </Link>
-            </CardHeader>
-            <CardContent>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+              <h2 className="text-[15px] font-semibold text-gray-900 dark:text-white">Prochains examens</h2>
+              <Link href="/calendrier" className="text-xs text-blue-500 hover:text-blue-600 font-medium">Voir tout →</Link>
+            </div>
+            <div className="p-4">
               {upcomingPlacements.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-6">
-                  Aucun examen planifié
-                </p>
+                <div className="text-center py-8">
+                  <p className="text-sm text-gray-400">Aucun examen planifié</p>
+                  <Link href="/calendrier" className="mt-2 inline-block text-xs text-blue-500 hover:underline">Planifier un examen</Link>
+                </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-1">
                   {upcomingPlacements.map((p) => (
-                    <div key={p.id} className="flex items-center gap-3 py-2 border-b border-gray-100 dark:border-gray-800 last:border-0">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-bold text-sm flex-shrink-0">
+                    <div key={p.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 dark:bg-orange-900/20 text-orange-600 font-bold text-sm flex-shrink-0">
                         {new Date(p.date).getDate()}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm text-gray-900 dark:text-white truncate">
+                        <p className="font-semibold text-sm text-gray-900 dark:text-white truncate">
                           {p.student.firstName} {p.student.lastName}
                         </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                          {p.time} · {p.examCenter}
+                        <p className="text-xs text-gray-400 truncate">
+                          {p.time}{p.examCenter ? ` · ${p.examCenter}` : ""}
                         </p>
                       </div>
-                      <Badge variant="warning" className="text-xs flex-shrink-0">
-                        {formatDate(p.date)}
-                      </Badge>
+                      <Badge variant="warning" className="text-xs flex-shrink-0">{formatDate(p.date)}</Badge>
                     </div>
                   ))}
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
           {/* Recent students */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base">Derniers élèves ajoutés</CardTitle>
-              <Link href="/eleves" className="text-sm text-blue-600 hover:underline">
-                Voir tout
-              </Link>
-            </CardHeader>
-            <CardContent>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+              <h2 className="text-[15px] font-semibold text-gray-900 dark:text-white">Derniers élèves ajoutés</h2>
+              <Link href="/eleves" className="text-xs text-blue-500 hover:text-blue-600 font-medium">Voir tout →</Link>
+            </div>
+            <div className="p-4">
               {recentStudents.length === 0 ? (
-                <div className="text-center py-6">
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">Aucun élève</p>
-                  <Link href="/eleves/nouveau" className="text-sm text-blue-600 hover:underline">
-                    Ajouter le premier élève
-                  </Link>
+                <div className="text-center py-8">
+                  <p className="text-sm text-gray-400 mb-2">Aucun élève inscrit</p>
+                  <Link href="/eleves/nouveau" className="text-xs text-blue-500 hover:underline">Ajouter le premier élève</Link>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-1">
                   {recentStudents.map((s) => (
                     <Link key={s.id} href={`/eleves/${s.id}`}>
-                      <div className="flex items-center gap-3 py-2 border-b border-gray-100 dark:border-gray-800 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg px-2 -mx-2 transition-colors">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-bold text-sm flex-shrink-0">
-                          {s.firstName[0]}{s.lastName[0]}
+                      <div className="flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-600 font-bold text-sm flex-shrink-0">
+                          {(s.firstName?.[0] || "")}{s.lastName?.[0] || ""}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm text-gray-900 dark:text-white truncate">
+                          <p className="font-semibold text-sm text-gray-900 dark:text-white truncate">
                             {s.firstName} {s.lastName}
                           </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            <Clock className="inline h-3 w-3 mr-0.5" />
-                            {s.drivingHours}h de conduite
+                          <p className="text-xs text-gray-400 flex items-center gap-1">
+                            <Clock className="h-3 w-3" />{s.drivingHours}h de conduite
                           </p>
                         </div>
                       </div>
@@ -186,8 +135,8 @@ export default async function DashboardPage() {
                   ))}
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       </div>
     </AppLayout>

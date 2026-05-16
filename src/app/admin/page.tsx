@@ -2,21 +2,21 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import { AppLayout } from "@/components/layout/app-layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Users, KeyRound, Building2, CheckCircle, Clock, XCircle } from "lucide-react";
+import { Users, KeyRound, Building2, CheckCircle, Clock } from "lucide-react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/utils";
 
 export default async function AdminPage() {
   const session = await auth();
   if (!session?.user || session.user.role !== "ADMIN") redirect("/dashboard");
 
-  const [totalUsers, totalKeys, usedKeys, recentUsers] = await Promise.all([
+  const [totalUsers, totalKeys, usedKeys, activeUsers, pendingUsers, recentUsers] = await Promise.all([
     prisma.user.count({ where: { role: "SCHOOL" } }),
     prisma.accessKey.count(),
     prisma.accessKey.count({ where: { used: true } }),
+    prisma.user.count({ where: { role: "SCHOOL", status: "ACTIVE" } }),
+    prisma.user.count({ where: { role: "SCHOOL", status: "PENDING" } }),
     prisma.user.findMany({
       where: { role: "SCHOOL" },
       include: { school: true },
@@ -25,118 +25,73 @@ export default async function AdminPage() {
     }),
   ]);
 
-  const activeUsers = await prisma.user.count({ where: { role: "SCHOOL", status: "ACTIVE" } });
-  const pendingUsers = await prisma.user.count({ where: { role: "SCHOOL", status: "PENDING" } });
+  const stats = [
+    { label: "Auto-écoles", value: totalUsers, icon: Building2, colorBg: "bg-blue-50 dark:bg-blue-900/20", iconColor: "text-blue-500" },
+    { label: "Comptes actifs", value: activeUsers, icon: CheckCircle, colorBg: "bg-green-50 dark:bg-green-900/20", iconColor: "text-green-500" },
+    { label: "En attente", value: pendingUsers, icon: Clock, colorBg: "bg-orange-50 dark:bg-orange-900/20", iconColor: "text-orange-500" },
+    { label: "Clés utilisées", value: `${usedKeys}/${totalKeys}`, icon: KeyRound, colorBg: "bg-purple-50 dark:bg-purple-900/20", iconColor: "text-purple-500" },
+  ];
 
   return (
     <AppLayout title="Administration" role={session.user.role} schoolName="Admin">
       <div className="space-y-6">
         {/* Stats */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
+          {stats.map(({ label, value, icon: Icon, colorBg, iconColor }) => (
+            <div key={label} className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 p-5">
+              <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">Auto-écoles</p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white">{totalUsers}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">{label}</p>
+                  <p className="text-3xl font-bold text-gray-900 dark:text-white">{value}</p>
                 </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900/30">
-                  <Building2 className="h-6 w-6 text-blue-600" />
+                <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${colorBg}`}>
+                  <Icon className={`h-5 w-5 ${iconColor}`} />
                 </div>
               </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-500">Comptes actifs</p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white">{activeUsers}</p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-green-100 dark:bg-green-900/30">
-                  <CheckCircle className="h-6 w-6 text-green-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-500">En attente</p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white">{pendingUsers}</p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100 dark:bg-orange-900/30">
-                  <Clock className="h-6 w-6 text-orange-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-500">Clés utilisées</p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white">{usedKeys}/{totalKeys}</p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-purple-100 dark:bg-purple-900/30">
-                  <KeyRound className="h-6 w-6 text-purple-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+            </div>
+          ))}
         </div>
 
         <div className="flex justify-end">
           <Link href="/admin/cles">
-            <Button className="gap-2">
+            <button className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold transition-colors shadow-sm">
               <KeyRound className="h-4 w-4" />
               Gérer les clés d'accès
-            </Button>
+            </button>
           </Link>
         </div>
 
         {/* Users list */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Users className="h-5 w-5" />
-              Comptes auto-école récents
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {recentUsers.map((user) => (
-                <div key={user.id} className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 flex-shrink-0">
-                    <Building2 className="h-4 w-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm text-gray-900 dark:text-white truncate">
-                      {user.school?.name || user.email}
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{user.email}</p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <Badge
-                      variant={
-                        user.status === "ACTIVE" ? "success" :
-                        user.status === "PENDING" ? "warning" : "destructive"
-                      }
-                      className="text-xs"
-                    >
-                      {user.status === "ACTIVE" ? "Actif" : user.status === "PENDING" ? "En attente" : "Suspendu"}
-                    </Badge>
-                    <span className="text-xs text-gray-400">{formatDate(user.createdAt)}</span>
-                  </div>
+        <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+            <Users className="h-4 w-4 text-gray-400" />
+            <h2 className="text-[15px] font-semibold text-gray-900 dark:text-white">Comptes auto-école</h2>
+          </div>
+          <div className="divide-y divide-gray-50 dark:divide-gray-800">
+            {recentUsers.map((user) => (
+              <div key={user.id} className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 flex-shrink-0">
+                  <Building2 className="h-4 w-4 text-gray-500" />
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm text-gray-900 dark:text-white truncate">
+                    {user.school?.name || user.email}
+                  </p>
+                  <p className="text-xs text-gray-400 truncate">{user.email}</p>
+                </div>
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  <Badge
+                    variant={user.status === "ACTIVE" ? "success" : user.status === "PENDING" ? "warning" : "destructive"}
+                    className="text-xs"
+                  >
+                    {user.status === "ACTIVE" ? "Actif" : user.status === "PENDING" ? "En attente" : "Suspendu"}
+                  </Badge>
+                  <span className="text-xs text-gray-400">{formatDate(user.createdAt)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </AppLayout>
   );
