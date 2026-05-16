@@ -2,6 +2,21 @@
 
 @variant dark (&:where(.dark, .dark *));
 
+/* ── Apple blue (#007AFF) override ── */
+@theme {
+  --color-blue-50:  #e5f2ff;
+  --color-blue-100: #cce5ff;
+  --color-blue-200: #99ccff;
+  --color-blue-300: #66b3ff;
+  --color-blue-400: #3399ff;
+  --color-blue-500: #007AFF;
+  --color-blue-600: #0062cc;
+  --color-blue-700: #004999;
+  --color-blue-800: #003166;
+  --color-blue-900: #001833;
+  --color-blue-950: #000c1a;
+}
+
 @layer base {
   * {
     box-sizing: border-box;

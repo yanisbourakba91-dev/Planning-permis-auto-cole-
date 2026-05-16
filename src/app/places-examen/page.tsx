@@ -14,9 +14,51 @@ interface ExamMonth {
   usedSlots: number;
 }
 
+interface WeekDef {
+  lsKey: string;
+  label: string;
+  start: Date;
+  end: Date;
+}
+
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 
-function getWeekBounds(): { start: Date; end: Date } {
+function pad(n: number) { return n.toString().padStart(2, "0"); }
+function fmtDate(d: Date) { return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`; }
+
+function getWeeksOfMonth(year: number, month: number): WeekDef[] {
+  const firstDay = new Date(year, month - 1, 1);
+  const lastDay = new Date(year, month, 0);
+
+  // Find the Monday at or before firstDay
+  let cursor = new Date(firstDay);
+  const dow = cursor.getDay();
+  cursor.setDate(cursor.getDate() - (dow === 0 ? 6 : dow - 1));
+
+  const weeks: WeekDef[] = [];
+  let idx = 0;
+  while (cursor <= lastDay) {
+    const wEnd = new Date(cursor);
+    wEnd.setDate(cursor.getDate() + 6);
+
+    const displayStart = cursor < firstDay ? firstDay : new Date(cursor);
+    const displayEnd = wEnd > lastDay ? lastDay : new Date(wEnd);
+
+    weeks.push({
+      lsKey: `planpermis_wk_${year}_${month}_${idx}`,
+      label: `${fmtDate(displayStart)} – ${fmtDate(displayEnd)}`,
+      start: new Date(cursor),
+      end: new Date(wEnd),
+    });
+
+    cursor = new Date(cursor);
+    cursor.setDate(cursor.getDate() + 7);
+    idx++;
+  }
+  return weeks;
+}
+
+function getCurrentWeekBounds(): { start: Date; end: Date } {
   const now = new Date();
   const day = now.getDay();
   const start = new Date(now);
@@ -28,6 +70,65 @@ function getWeekBounds(): { start: Date; end: Date } {
   return { start, end };
 }
 
+/* ── Inline editable number ── */
+function EditableCount({
+  lsKey,
+  label,
+}: {
+  lsKey: string;
+  label: string;
+}) {
+  const [val, setVal] = useState<number>(() => {
+    if (typeof window === "undefined") return 0;
+    return parseInt(localStorage.getItem(lsKey) || "0");
+  });
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  function commit(raw: string) {
+    const n = Math.max(0, parseInt(raw) || 0);
+    setVal(n);
+    localStorage.setItem(lsKey, String(n));
+    setEditing(false);
+  }
+
+  return (
+    <div className="flex items-center justify-between py-1.5 px-1 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800/50 group transition-colors">
+      <span className="text-xs text-gray-500">{label}</span>
+      {editing ? (
+        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+          <input
+            type="number"
+            min={0}
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "Enter") commit(draft);
+              if (e.key === "Escape") setEditing(false);
+            }}
+            autoFocus
+            className="w-12 text-center text-xs font-semibold text-blue-600 bg-transparent border-b border-blue-400 focus:outline-none"
+          />
+          <button onClick={() => commit(draft)} className="text-green-500 hover:text-green-600">
+            <Check className="h-3 w-3" />
+          </button>
+          <button onClick={() => setEditing(false)} className="text-gray-400 hover:text-gray-600">
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      ) : (
+        <div
+          className="flex items-center gap-1 cursor-pointer"
+          onClick={() => { setDraft(String(val)); setEditing(true); }}
+        >
+          <span className="text-xs font-semibold text-gray-800 dark:text-gray-200">{val} place{val !== 1 ? "s" : ""}</span>
+          <Pencil className="h-2.5 w-2.5 text-gray-300 group-hover:text-blue-400 transition-colors" />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PlacesExamenPage() {
   const { data: session } = useSession();
   const now = new Date();
@@ -37,7 +138,7 @@ export default function PlacesExamenPage() {
   const [saving, setSaving] = useState<number | null>(null);
   const [edits, setEdits] = useState<Record<number, string>>({});
 
-  /* Weekly data */
+  /* Weekly global data */
   const [weekPlacements, setWeekPlacements] = useState(0);
   const [weeklyLimit, setWeeklyLimit] = useState(10);
   const [editingWeekly, setEditingWeekly] = useState(false);
@@ -55,6 +156,7 @@ export default function PlacesExamenPage() {
       const data = await res.json();
       const list: ExamMonth[] = Array.isArray(data) ? data : [];
       setMonths(list);
+
       const initialEdits: Record<number, string> = {};
       MONTHS.forEach(m => {
         const found = list.find(x => x.month === m);
@@ -63,7 +165,7 @@ export default function PlacesExamenPage() {
       setEdits(initialEdits);
 
       /* Fetch current week placements */
-      const { start, end } = getWeekBounds();
+      const { start, end } = getCurrentWeekBounds();
       const [p1, p2] = await Promise.all([
         fetch(`/api/placements?year=${start.getFullYear()}&month=${start.getMonth() + 1}`).then(r => r.json()),
         start.getMonth() !== end.getMonth()
@@ -172,7 +274,10 @@ export default function PlacesExamenPage() {
                   min={0}
                   value={weeklyInput}
                   onChange={e => setWeeklyInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") saveWeeklyLimit(parseInt(weeklyInput) || 0); if (e.key === "Escape") setEditingWeekly(false); }}
+                  onKeyDown={e => {
+                    if (e.key === "Enter") saveWeeklyLimit(parseInt(weeklyInput) || 0);
+                    if (e.key === "Escape") setEditingWeekly(false);
+                  }}
                   autoFocus
                   className="w-16 text-center text-2xl font-bold text-green-600 bg-transparent border-b-2 border-green-400 focus:outline-none"
                 />
@@ -192,7 +297,7 @@ export default function PlacesExamenPage() {
         {/* Info banner */}
         <div className="flex items-start gap-2.5 p-4 rounded-2xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 text-sm text-blue-700 dark:text-blue-300">
           <Info className="h-4 w-4 flex-shrink-0 mt-0.5" />
-          <p>Définissez le nombre de places disponibles pour chaque mois. Le compteur décrémente automatiquement à chaque placement d'examen.</p>
+          <p>Définissez le nombre de places disponibles pour chaque mois et chaque semaine. Le compteur mensuel décrémente automatiquement à chaque placement. Les compteurs hebdomadaires sont enregistrés localement.</p>
         </div>
 
         {/* Month grid */}
@@ -209,6 +314,7 @@ export default function PlacesExamenPage() {
               const isCurrentMonth = month === now.getMonth() + 1 && year === now.getFullYear();
               const isPast = year < now.getFullYear() || (year === now.getFullYear() && month < now.getMonth() + 1);
               const fillRatio = data?.totalSlots ? used / data.totalSlots : 0;
+              const weeks = getWeeksOfMonth(year, month);
 
               return (
                 <div
@@ -231,15 +337,15 @@ export default function PlacesExamenPage() {
                       </div>
                       <div className="h-1.5 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
                         <div
-                          className={`h-full rounded-full transition-all ${fillRatio >= 1 ? "bg-red-500" : fillRatio >= 0.75 ? "bg-orange-500" : "bg-green-500"}`}
+                          className={`h-full rounded-full transition-all ${fillRatio >= 1 ? "bg-red-500" : fillRatio >= 0.75 ? "bg-orange-500" : "bg-blue-500"}`}
                           style={{ width: `${Math.min(fillRatio * 100, 100)}%` }}
                         />
                       </div>
                     </div>
                   )}
 
-                  {/* Input + save */}
-                  <div className="flex gap-2">
+                  {/* Monthly total input + save */}
+                  <div className="flex gap-2 mb-4">
                     <input
                       type="number"
                       min="0"
@@ -252,7 +358,7 @@ export default function PlacesExamenPage() {
                     <button
                       disabled={isPast || saving === month}
                       onClick={() => handleSave(month)}
-                      title="Enregistrer"
+                      title="Enregistrer le total mensuel"
                       className="flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-500 hover:border-blue-400 hover:text-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     >
                       {saving === month
@@ -260,8 +366,23 @@ export default function PlacesExamenPage() {
                         : <Save className="h-4 w-4" />}
                     </button>
                   </div>
-                  <p className="text-[10px] text-gray-400 text-center mt-2">
-                    {isPast ? "Mois passé" : "Places disponibles à définir"}
+
+                  {/* Weekly breakdown */}
+                  <div className="border-t border-gray-100 dark:border-gray-800 pt-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-2">Places par semaine</p>
+                    <div className="space-y-0.5">
+                      {weeks.map(week => (
+                        <EditableCount
+                          key={week.lsKey}
+                          lsKey={week.lsKey}
+                          label={week.label}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-gray-400 text-center mt-3">
+                    {isPast ? "Mois passé" : "Total mensuel · hebdo modifiable"}
                   </p>
                 </div>
               );
