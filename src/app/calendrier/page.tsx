@@ -4,9 +4,13 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import {
   DndContext, DragOverlay, useDraggable, useDroppable,
-  useSensor, useSensors, PointerSensor,
-  type DragEndEvent, type DragStartEvent,
+  useSensor, useSensors, MouseSensor, TouchSensor, KeyboardSensor,
+  type DragEndEvent, type DragStartEvent, type DragOverEvent,
 } from "@dnd-kit/core";
+import {
+  SortableContext, useSortable, sortableKeyboardCoordinates,
+  arrayMove, verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Modal } from "@/components/ui/modal";
@@ -91,8 +95,8 @@ function EditableCounter({ label, value, sub, color, onSave }: {
   const [input, setInput] = useState("");
   const ref = useRef<HTMLInputElement>(null);
   const cls = color === "blue"
-    ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
-    : "bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400";
+    ? "bg-blue-50/80 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-800"
+    : "bg-green-50/80 dark:bg-green-900/20 text-green-600 dark:text-green-400 border border-green-100 dark:border-green-800";
 
   function start() {
     if (!onSave) return;
@@ -106,7 +110,7 @@ function EditableCounter({ label, value, sub, color, onSave }: {
     setEditing(false);
   }
   return (
-    <div className={cn("flex flex-col items-center px-5 py-3 rounded-2xl min-w-[150px]", cls, onSave && "cursor-pointer")} onClick={!editing ? start : undefined}>
+    <div className={cn("flex flex-col items-center px-5 py-3 rounded-2xl min-w-[150px] shadow-sm", cls, onSave && "cursor-pointer")} onClick={!editing ? start : undefined}>
       <span className="text-[10px] font-semibold uppercase tracking-wider opacity-60 mb-1 text-center leading-tight">{label}</span>
       {editing ? (
         <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
@@ -128,27 +132,27 @@ function EditableCounter({ label, value, sub, color, onSave }: {
   );
 }
 
-/* ── DnD: Draggable queue student ── */
-function DraggableStudent({ student, onClick }: { student: Student; onClick: () => void }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+/* ── DnD: Sortable queue student (sortable within queue + draggable to calendar) ── */
+function SortableStudent({ student, onClick }: { student: Student; onClick: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: `queue-${student.id}`,
     data: { type: "queue", student },
   });
   return (
     <div
       ref={setNodeRef}
-      style={transform ? { transform: CSS.Translate.toString(transform) } : undefined}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
       {...listeners}
       {...attributes}
       className={cn(
-        "bg-white dark:bg-gray-800 rounded-xl p-2 border border-gray-100 dark:border-gray-700 select-none",
-        "cursor-grab active:cursor-grabbing hover:border-blue-200 hover:shadow-sm transition-all",
-        isDragging && "opacity-40"
+        "glass rounded-xl p-2 select-none",
+        "cursor-grab active:cursor-grabbing hover:shadow-md hover:border-blue-200 transition-all duration-150",
+        isDragging ? "opacity-30 shadow-2xl scale-95" : "opacity-100"
       )}
       onClick={onClick}
     >
       <div className="flex items-center gap-1.5">
-        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-500 text-[10px] font-bold flex-shrink-0">
+        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 text-[10px] font-bold flex-shrink-0">
           {initials(student)}
         </div>
         <div className="min-w-0">
@@ -195,8 +199,10 @@ function DroppableSlot({ slotKey, dateStr, time, children, onClick }: {
     <div
       ref={setNodeRef}
       className={cn(
-        "h-14 border-t border-gray-100 dark:border-gray-800/60 relative transition-all duration-75 cursor-pointer group",
-        isOver ? "bg-blue-50 dark:bg-blue-900/20 ring-2 ring-inset ring-blue-500" : "hover:bg-gray-50/80 dark:hover:bg-gray-800/30"
+        "h-14 border-t border-gray-100 dark:border-gray-800/60 relative transition-all duration-75 cursor-pointer",
+        isOver
+          ? "bg-blue-50 dark:bg-blue-900/20 ring-2 ring-inset ring-blue-500 scale-[0.99]"
+          : "hover:bg-gray-50/60 dark:hover:bg-gray-800/30"
       )}
       onClick={onClick}
     >
@@ -233,8 +239,12 @@ export default function CalendrierPage() {
     localStorage.setItem("planpermis_weekly_limit", String(v));
   }
 
-  /* DnD */
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  /* ── DnD sensors: MouseSensor + TouchSensor (more reliable than PointerSensor) ── */
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 10 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
 
   /* Modals */
@@ -297,11 +307,33 @@ export default function CalendrierPage() {
   function handleDragStart({ active }: DragStartEvent) {
     setActiveDrag(active.data.current as ActiveDrag);
   }
+
+  function handleDragOver({ active, over }: DragOverEvent) {
+    if (!over) return;
+    const drag = active.data.current as ActiveDrag | null;
+    if (drag?.type !== "queue") return;
+    // Only handle queue-to-queue hover (for live sorting)
+    const overData = over.data.current as { type?: string } | undefined;
+    if (overData?.type !== "queue") return;
+    const oldIdx = students.findIndex(s => `queue-${s.id}` === String(active.id));
+    const newIdx = students.findIndex(s => `queue-${s.id}` === String(over.id));
+    if (oldIdx !== -1 && newIdx !== -1 && oldIdx !== newIdx) {
+      setStudents(prev => arrayMove(prev, oldIdx, newIdx));
+    }
+  }
+
   function handleDragEnd({ active, over }: DragEndEvent) {
     setActiveDrag(null);
     if (!over || !active.data.current) return;
     const drag = active.data.current as ActiveDrag;
-    const { dateStr, time } = over.data.current as { dateStr: string; time: string };
+    const overData = over.data.current as { type?: string; student?: Student; dateStr?: string; time?: string } | undefined;
+
+    // Queue-to-queue: sorting already done in handleDragOver — nothing more to do
+    if (drag.type === "queue" && overData?.type === "queue") return;
+
+    // Drop on calendar slot
+    if (!overData?.dateStr || !overData?.time) return;
+    const { dateStr, time } = overData;
     if (drag.type === "queue") {
       setPForm({ studentId: drag.student.id, date: dateStr, time, instructor: "", examCenter: "", notes: "" });
       setQueueStudent(null);
@@ -382,23 +414,29 @@ export default function CalendrierPage() {
     bySlot.get(k)!.push(p);
   });
   const studentOptions = students.map(s => ({ value: s.id, label: fullName(s) }));
+  const queueIds = students.map(s => `queue-${s.id}`);
 
   return (
     <AppLayout title="Calendrier" role={session?.user?.role || ""} schoolName={session?.user?.schoolName}>
-      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <DndContext
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+      >
         <div className="flex flex-col gap-4" style={{ height: "calc(100vh - 57px)" }}>
 
           {/* ── Toolbar ── */}
-          <div className="flex flex-wrap items-center gap-3 flex-shrink-0">
-            <div className="flex items-center gap-1 bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 p-1">
+          <div className="flex flex-wrap items-center gap-3 flex-shrink-0 animate-fade-up">
+            <div className="flex items-center gap-1 glass rounded-xl shadow-sm p-1">
               <button onClick={prev} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors"><ChevronLeft className="h-4 w-4" /></button>
               <span className="px-3 text-sm font-semibold text-gray-800 dark:text-gray-200 min-w-[210px] text-center">
                 {view === "week" ? getWeekLabel(weekDays) : `${MONTH_NAMES[currentMonth-1]} ${currentYear}`}
               </span>
               <button onClick={next} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors"><ChevronRight className="h-4 w-4" /></button>
             </div>
-            <button onClick={goToday} className="px-3 py-1.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-sm text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">Aujourd'hui</button>
-            <div className="flex rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-sm p-1 ml-auto">
+            <button onClick={goToday} className="px-3 py-1.5 rounded-xl glass shadow-sm text-sm font-medium text-gray-600 hover:bg-white/90 transition-colors">Aujourd'hui</button>
+            <div className="flex rounded-xl glass shadow-sm p-1 ml-auto">
               <button onClick={() => setView("week")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", view === "week" ? "bg-blue-500 text-white shadow-sm" : "text-gray-500 hover:text-gray-700")}>
                 <AlignJustify className="h-3.5 w-3.5" /> Semaine
               </button>
@@ -410,7 +448,7 @@ export default function CalendrierPage() {
 
           {/* ── Counters ── */}
           {view === "week" && (
-            <div className="flex gap-3 flex-wrap flex-shrink-0">
+            <div className="flex gap-3 flex-wrap flex-shrink-0 animate-fade-up-1">
               <EditableCounter label="Places restantes ce mois" value={monthAvailable} sub={monthData ? `sur ${monthData.totalSlots} · cliquer pour modifier` : "Cliquer pour définir"} color="blue" onSave={saveMonthlyTotal} />
               <EditableCounter label="Places disponibles cette semaine" value={Math.max(0, weeklyLimit - weekCount)} sub={`${weekCount} planifié${weekCount !== 1 ? "s" : ""} · limite : ${weeklyLimit} · cliquer`} color="green" onSave={saveWeeklyLimit} />
             </div>
@@ -422,15 +460,15 @@ export default function CalendrierPage() {
           ) : view === "week" ? (
 
             /* ════ WEEK VIEW ════ */
-            <div className="flex-1 bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col min-h-0">
+            <div className="flex-1 glass rounded-2xl shadow-sm overflow-hidden flex flex-col min-h-0 animate-fade-up-2">
               {/* Day headers */}
-              <div className="flex border-b-2 border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/30 flex-shrink-0">
-                <div className="w-14 flex-shrink-0 border-r border-gray-200 dark:border-gray-700" />
+              <div className="flex border-b-2 border-gray-200/60 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-800/30 flex-shrink-0">
+                <div className="w-14 flex-shrink-0 border-r border-gray-200/60 dark:border-gray-700" />
                 {weekDays.map((day, di) => {
                   const dKey = toKey(day);
                   const isToday = dKey === todayKey;
                   return (
-                    <div key={dKey} className={cn("flex-1 min-w-0 flex flex-col items-center py-2.5 border-r border-gray-100 dark:border-gray-800 last:border-r-0", isToday && "bg-blue-50/50 dark:bg-blue-900/10")}>
+                    <div key={dKey} className={cn("flex-1 min-w-0 flex flex-col items-center py-2.5 border-r border-gray-100/60 dark:border-gray-800 last:border-r-0", isToday && "bg-blue-50/60 dark:bg-blue-900/10")}>
                       <span className={cn("text-[10px] font-bold uppercase tracking-widest", isToday ? "text-blue-500" : "text-gray-400")}>{DAYS_SHORT[di]}</span>
                       <span className={cn("mt-1 flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold", isToday ? "bg-blue-500 text-white shadow-sm" : "text-gray-800 dark:text-gray-200")}>
                         {day.getDate()}
@@ -439,7 +477,7 @@ export default function CalendrierPage() {
                   );
                 })}
                 {/* Queue header */}
-                <div className="w-44 flex-shrink-0 border-l-2 border-blue-100 dark:border-blue-900/50 bg-blue-50/30 dark:bg-blue-900/10 flex items-center justify-between px-3 py-2.5">
+                <div className="w-44 flex-shrink-0 border-l-2 border-blue-200/50 dark:border-blue-900/50 bg-blue-50/40 dark:bg-blue-900/10 flex items-center justify-between px-3 py-2.5">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-blue-500">File d'attente</span>
                   <button onClick={() => { setFormError(""); setModal("queue"); }} className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-white hover:bg-blue-600 transition-colors shadow-sm">
                     <Plus className="h-3 w-3" />
@@ -450,9 +488,9 @@ export default function CalendrierPage() {
               {/* Scrollable body */}
               <div className="flex flex-1 overflow-y-auto min-h-0">
                 {/* Time column */}
-                <div className="w-14 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-gray-50/30 dark:bg-gray-800/20">
+                <div className="w-14 flex-shrink-0 border-r border-gray-200/60 dark:border-gray-700 bg-gray-50/20 dark:bg-gray-800/20">
                   {TIME_SLOTS.map(t => (
-                    <div key={t} className="h-14 flex items-start justify-center pt-1.5 border-t border-gray-100 dark:border-gray-800">
+                    <div key={t} className="h-14 flex items-start justify-center pt-1.5 border-t border-gray-100/60 dark:border-gray-800">
                       <span className="text-[10px] font-medium text-gray-400">{t}</span>
                     </div>
                   ))}
@@ -463,7 +501,7 @@ export default function CalendrierPage() {
                   const dKey = toKey(day);
                   const isToday = dKey === todayKey;
                   return (
-                    <div key={dKey} className={cn("flex-1 min-w-0 border-r border-gray-100 dark:border-gray-800 last:border-r-0", isToday && "bg-blue-50/20 dark:bg-blue-900/5")}>
+                    <div key={dKey} className={cn("flex-1 min-w-0 border-r border-gray-100/60 dark:border-gray-800 last:border-r-0", isToday && "bg-blue-50/15 dark:bg-blue-900/5")}>
                       {TIME_SLOTS.map(time => {
                         const slotKey = `${dKey}:${time}`;
                         const slotPlacements = bySlot.get(slotKey) || [];
@@ -490,15 +528,17 @@ export default function CalendrierPage() {
                 })}
 
                 {/* Queue column */}
-                <div className="w-44 flex-shrink-0 border-l-2 border-blue-100 dark:border-blue-900/50 bg-blue-50/20 dark:bg-blue-900/5 overflow-y-auto p-2 space-y-1.5">
-                  {students.length === 0 ? (
-                    <div className="h-24 flex flex-col items-center justify-center text-center gap-1">
-                      <p className="text-xs text-gray-400">Aucun élève</p>
-                      <button onClick={() => setModal("queue")} className="text-xs text-blue-500 underline">Ajouter</button>
-                    </div>
-                  ) : students.map(s => (
-                    <DraggableStudent key={s.id} student={s} onClick={() => openFromQueue(s)} />
-                  ))}
+                <div className="w-44 flex-shrink-0 border-l-2 border-blue-200/40 dark:border-blue-900/50 bg-blue-50/15 dark:bg-blue-900/5 overflow-y-auto p-2 space-y-1.5">
+                  <SortableContext items={queueIds} strategy={verticalListSortingStrategy}>
+                    {students.length === 0 ? (
+                      <div className="h-24 flex flex-col items-center justify-center text-center gap-1">
+                        <p className="text-xs text-gray-400">Aucun élève</p>
+                        <button onClick={() => setModal("queue")} className="text-xs text-blue-500 underline">Ajouter</button>
+                      </div>
+                    ) : students.map(s => (
+                      <SortableStudent key={s.id} student={s} onClick={() => openFromQueue(s)} />
+                    ))}
+                  </SortableContext>
                 </div>
               </div>
             </div>
@@ -506,13 +546,13 @@ export default function CalendrierPage() {
           ) : (
 
             /* ════ MONTH VIEW ════ */
-            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-              <div className="grid grid-cols-7 border-b-2 border-gray-200 dark:border-gray-700 bg-gray-50/50">
+            <div className="glass rounded-2xl shadow-sm overflow-hidden animate-fade-up-2">
+              <div className="grid grid-cols-7 border-b-2 border-gray-200/60 dark:border-gray-700 bg-gray-50/40">
                 {DAYS_SHORT.map(d => <div key={d} className="py-2.5 text-center text-[10px] font-bold uppercase tracking-widest text-gray-400">{d}</div>)}
               </div>
               <div className="grid grid-cols-7">
                 {Array.from({ length: getFirstOffset(currentYear, currentMonth) }).map((_, i) => (
-                  <div key={`e-${i}`} className="h-24 border-b border-r border-gray-50 dark:border-gray-800 bg-gray-50/30 dark:bg-gray-800/20" />
+                  <div key={`e-${i}`} className="h-24 border-b border-r border-gray-50/60 dark:border-gray-800 bg-gray-50/20 dark:bg-gray-800/20" />
                 ))}
                 {Array.from({ length: getDaysInMonth(currentYear, currentMonth) }).map((_, i) => {
                   const day = i + 1;
@@ -521,7 +561,7 @@ export default function CalendrierPage() {
                   const isToday = dKey === todayKey;
                   return (
                     <div key={day} onClick={() => { setView("week"); setWeekStart(getWeekStart(new Date(currentYear, currentMonth-1, day))); }}
-                      className={cn("h-24 border-b border-r border-gray-100 dark:border-gray-800 p-1.5 cursor-pointer hover:bg-blue-50/30 transition-colors", isToday && "bg-blue-50/40 dark:bg-blue-900/10")}
+                      className={cn("h-24 border-b border-r border-gray-100/60 dark:border-gray-800 p-1.5 cursor-pointer hover:bg-blue-50/40 transition-colors", isToday && "bg-blue-50/50 dark:bg-blue-900/10")}
                     >
                       <span className={cn("inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold", isToday ? "bg-blue-500 text-white" : "text-gray-700 dark:text-gray-300")}>
                         {day}
@@ -545,9 +585,9 @@ export default function CalendrierPage() {
         {/* ── Drag overlay (visual ghost) ── */}
         <DragOverlay dropAnimation={null}>
           {activeDrag?.type === "queue" && (
-            <div className="bg-white rounded-xl shadow-2xl border border-blue-200 p-2 w-40 rotate-2 opacity-95 pointer-events-none">
+            <div className="glass rounded-xl shadow-2xl p-2 w-40 rotate-2 opacity-95 pointer-events-none border-blue-200">
               <div className="flex items-center gap-1.5">
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-50 text-blue-500 text-[10px] font-bold flex-shrink-0">
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-600 text-[10px] font-bold flex-shrink-0">
                   {initials(activeDrag.student)}
                 </div>
                 <span className="text-[11px] font-semibold text-gray-900 truncate">{fullName(activeDrag.student)}</span>
