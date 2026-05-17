@@ -2,19 +2,6 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
-import {
-  DndContext,
-  DragOverlay,
-  useDraggable,
-  useDroppable,
-  useSensor,
-  useSensors,
-  MouseSensor,
-  TouchSensor,
-  type DragEndEvent,
-  type DragStartEvent,
-} from "@dnd-kit/core";
-import { CSS } from "@dnd-kit/utilities";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Modal } from "@/components/ui/modal";
 import { Input } from "@/components/ui/input";
@@ -100,52 +87,40 @@ function weekLabel(days: Date[]): string {
     : `${f.getDate()} ${MONTH_NAMES[f.getMonth()]} – ${l.getDate()} ${MONTH_NAMES[l.getMonth()]} ${l.getFullYear()}`;
 }
 
-/* ─────────────────────────────────────────────
-   DND COMPONENTS
-   Key design: drag handle is SEPARATE from click area
-   so browser's post-drag "click" event doesn't open modals.
-───────────────────────────────────────────── */
+/* ═══════════════════════════════════════
+   DRAG & DROP COMPONENTS — HTML5 native
+   dragstart/drop are mutually exclusive with click,
+   so no click-suppression hacks needed.
+═══════════════════════════════════════ */
 
-/**
- * Queue card.
- * - Avatar = drag handle (gets dnd-kit listeners, no onClick)
- * - Text = click area (opens placement modal, no drag listeners)
- * This completely prevents the browser's post-drag click from triggering the modal.
- */
 function QueueCard({
   student,
   onClickCard,
-  dragJustEndedRef,
+  onDragStart,
 }: {
   student: Student;
   onClickCard: () => void;
-  dragJustEndedRef: React.RefObject<boolean>;
+  onDragStart: (data: DragData) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({
-      id: `student-${student.id}`,
-      data: { kind: "student", student } satisfies DragData,
-    });
-
-  function handleClick() {
-    if (dragJustEndedRef.current) return;
-    onClickCard();
-  }
-
+  const [dragging, setDragging] = useState(false);
   return (
     <div
-      ref={setNodeRef}
-      {...listeners}
-      {...attributes}
-      style={{ touchAction: "none", ...(transform ? { transform: CSS.Translate.toString(transform) } : {}) }}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", "1"); // required by Firefox
+        setDragging(true);
+        onDragStart({ kind: "student", student });
+      }}
+      onDragEnd={() => setDragging(false)}
+      onClick={onClickCard}
       className={cn(
         "bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700",
         "flex items-center gap-2 px-2 py-1.5 select-none cursor-grab active:cursor-grabbing",
-        isDragging && "opacity-40"
+        dragging && "opacity-40"
       )}
-      onClick={handleClick}
     >
-      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 text-[10px] font-bold flex-shrink-0 flex-shrink-0">
+      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 text-[10px] font-bold flex-shrink-0">
         {initials(student)}
       </div>
       <div className="min-w-0 flex-1 leading-tight">
@@ -160,90 +135,74 @@ function QueueCard({
   );
 }
 
-/**
- * Existing placement chip inside a time slot.
- * - Whole chip is the drag handle.
- * - Uses dragJustEndedRef to suppress the post-drag click.
- */
 function PlacementChip({
   placement,
-  dragJustEndedRef,
   onClickChip,
+  onDragStart,
 }: {
   placement: Placement;
-  dragJustEndedRef: React.RefObject<boolean>;
   onClickChip: (e: React.MouseEvent) => void;
+  onDragStart: (data: DragData) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({
-      id: `placement-${placement.id}`,
-      data: { kind: "placement", placement } satisfies DragData,
-    });
-
-  function handleClick(e: React.MouseEvent) {
-    e.stopPropagation();
-    if (dragJustEndedRef.current) return; // suppress click after drag
-    onClickChip(e);
-  }
-
+  const [dragging, setDragging] = useState(false);
   return (
     <div
-      ref={setNodeRef}
-      style={{ touchAction: "none", ...(transform ? { transform: CSS.Translate.toString(transform) } : {}) }}
-      {...listeners}
-      {...attributes}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", "1");
+        setDragging(true);
+        onDragStart({ kind: "placement", placement });
+      }}
+      onDragEnd={() => setDragging(false)}
+      onClick={(e) => { e.stopPropagation(); onClickChip(e); }}
       className={cn(
         "absolute inset-x-0.5 top-0.5 bottom-0.5 flex items-center px-1.5 rounded-lg z-10 select-none",
         "bg-gradient-to-br from-blue-500 to-blue-600 text-white text-[10px] font-semibold shadow-sm",
         "cursor-grab active:cursor-grabbing",
-        isDragging && "opacity-30"
+        dragging && "opacity-30"
       )}
-      onClick={handleClick}
     >
       <span className="truncate">{fullName(placement.student)}</span>
     </div>
   );
 }
 
-/**
- * Time slot — drop target.
- * Highlights blue when a draggable hovers over it.
- */
 function TimeSlot({
   slotId,
   dateStr,
   time,
   children,
   onClickSlot,
-  dragJustEndedRef,
+  isOver,
+  onDragOver,
+  onDragLeave,
+  onDrop,
 }: {
   slotId: string;
   dateStr: string;
   time: string;
   children: React.ReactNode;
   onClickSlot: () => void;
-  dragJustEndedRef: React.RefObject<boolean>;
+  isOver: boolean;
+  onDragOver: (id: string) => void;
+  onDragLeave: (id: string) => void;
+  onDrop: (dateStr: string, time: string) => void;
 }) {
-  const { isOver, setNodeRef } = useDroppable({
-    id: slotId,
-    data: { dateStr, time },
-  });
-
-  function handleClick() {
-    if (dragJustEndedRef.current) return; // suppress click fired after drop
-    onClickSlot();
-  }
-
   return (
     <div
-      ref={setNodeRef}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; onDragOver(slotId); }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) onDragLeave(slotId);
+      }}
+      onDrop={(e) => { e.preventDefault(); onDrop(dateStr, time); }}
+      onClick={onClickSlot}
       className={cn(
         "h-14 border-t border-gray-100 dark:border-gray-800/60 relative cursor-pointer transition-colors duration-75",
         isOver
           ? "bg-blue-100 dark:bg-blue-900/30 ring-2 ring-inset ring-blue-500"
           : "hover:bg-gray-50/80 dark:hover:bg-gray-800/30"
       )}
-      onClick={handleClick}
     >
       {children}
     </div>
@@ -332,15 +291,41 @@ export default function CalendrierPage() {
     localStorage.setItem("planpermis_weekly_limit", String(v));
   }
 
-  const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 3 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } })
-  );
+  /* ── Drag state ── */
+  const dragSrcRef = useRef<DragData | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
 
-  /* Track if a drag just ended so PlacementChip can suppress the post-drag click */
-  const dragJustEndedRef = useRef(false);
+  function handleDragStart(data: DragData) {
+    dragSrcRef.current = data;
+  }
+  function handleDragEnd() {
+    dragSrcRef.current = null;
+    setDropTarget(null);
+  }
+  function handleDrop(dateStr: string, time: string) {
+    const src = dragSrcRef.current;
+    dragSrcRef.current = null;
+    setDropTarget(null);
+    if (!src) return;
 
-  const [activeDrag, setActiveDrag] = useState<DragData | null>(null);
+    if (src.kind === "student") {
+      setPForm({ studentId: src.student.id, date: dateStr, time, instructor: "", examCenter: "", notes: "" });
+      setQueueStu(null);
+      setFormError("");
+      setModal("add");
+    } else {
+      const p = src.placement;
+      if (p.date.slice(0, 10) !== dateStr || p.time !== time) {
+        fetch(`/api/placements/${p.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ date: dateStr, time }),
+        })
+          .then(() => fetchData())
+          .catch(() => { /* silent */ });
+      }
+    }
+  }
 
   /* Modals */
   type ModalKind = "add" | "detail" | "queue" | "newStudent" | null;
@@ -416,52 +401,6 @@ export default function CalendrierPage() {
     setWStart(weekStartOf(now));
     setCurYear(now.getFullYear());
     setCurMonth(now.getMonth()+1);
-  }
-
-  /* ── DnD ── */
-  function handleDragStart({ active }: DragStartEvent) {
-    setActiveDrag(active.data.current as DragData);
-  }
-
-  function handleDragEnd({ active, over }: DragEndEvent) {
-    setActiveDrag(null);
-
-    /* Mark drag-just-ended so PlacementChip suppresses the upcoming click */
-    dragJustEndedRef.current = true;
-    setTimeout(() => { dragJustEndedRef.current = false; }, 200);
-
-    if (!over) return;
-
-    const src = active.data.current as DragData | undefined;
-    const dst = over.data.current as { dateStr: string; time: string } | undefined;
-    if (!src || !dst?.dateStr || !dst?.time) return;
-
-    if (src.kind === "student") {
-      /* Drop queue student onto a slot → pre-fill placement modal */
-      setPForm({
-        studentId: src.student.id,
-        date: dst.dateStr,
-        time: dst.time,
-        instructor: "",
-        examCenter: "",
-        notes: "",
-      });
-      setQueueStu(null);
-      setFormError("");
-      setModal("add");
-    } else if (src.kind === "placement") {
-      /* Move existing placement to another slot */
-      const p = src.placement;
-      if (p.date.slice(0, 10) !== dst.dateStr || p.time !== dst.time) {
-        fetch(`/api/placements/${p.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ date: dst.dateStr, time: dst.time }),
-        })
-          .then(() => fetchData())
-          .catch(() => { /* silent */ });
-      }
-    }
   }
 
   /* ── Modal helpers ── */
@@ -545,217 +484,199 @@ export default function CalendrierPage() {
   return (
     <AppLayout title="Calendrier" role={session?.user?.role || ""} schoolName={session?.user?.schoolName}>
 
-      {/* DndContext wraps ONLY the calendar. Modals are intentionally outside. */}
-      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <div className="flex flex-col gap-4" style={{ height: "calc(100vh - 57px)" }}>
 
-        <div className="flex flex-col gap-4" style={{ height: "calc(100vh - 57px)" }}>
-
-          {/* Toolbar */}
-          <div className="flex flex-wrap items-center gap-3 flex-shrink-0">
-            <div className="flex items-center gap-1 bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 p-1">
-              <button onClick={prev} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors">
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <span className="px-3 text-sm font-semibold text-gray-800 dark:text-gray-200 min-w-[210px] text-center">
-                {view === "week" ? weekLabel(days) : `${MONTH_NAMES[curMonth-1]} ${curYear}`}
-              </span>
-              <button onClick={next} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors">
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-            <button onClick={goToday} className="px-3 py-1.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors shadow-sm">
-              Aujourd'hui
+        {/* Toolbar */}
+        <div className="flex flex-wrap items-center gap-3 flex-shrink-0">
+          <div className="flex items-center gap-1 bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 p-1">
+            <button onClick={prev} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors">
+              <ChevronLeft className="h-4 w-4" />
             </button>
-            <div className="flex rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-sm p-1 ml-auto">
-              <button onClick={() => setView("week")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", view === "week" ? "bg-blue-500 text-white shadow-sm" : "text-gray-500 hover:text-gray-700")}>
-                <AlignJustify className="h-3.5 w-3.5" /> Semaine
-              </button>
-              <button onClick={() => setView("month")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", view === "month" ? "bg-blue-500 text-white shadow-sm" : "text-gray-500 hover:text-gray-700")}>
-                <LayoutGrid className="h-3.5 w-3.5" /> Mois
-              </button>
+            <span className="px-3 text-sm font-semibold text-gray-800 dark:text-gray-200 min-w-[210px] text-center">
+              {view === "week" ? weekLabel(days) : `${MONTH_NAMES[curMonth-1]} ${curYear}`}
+            </span>
+            <button onClick={next} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors">
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+          <button onClick={goToday} className="px-3 py-1.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors shadow-sm">
+            Aujourd'hui
+          </button>
+          <div className="flex rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-sm p-1 ml-auto">
+            <button onClick={() => setView("week")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", view === "week" ? "bg-blue-500 text-white shadow-sm" : "text-gray-500 hover:text-gray-700")}>
+              <AlignJustify className="h-3.5 w-3.5" /> Semaine
+            </button>
+            <button onClick={() => setView("month")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", view === "month" ? "bg-blue-500 text-white shadow-sm" : "text-gray-500 hover:text-gray-700")}>
+              <LayoutGrid className="h-3.5 w-3.5" /> Mois
+            </button>
+          </div>
+        </div>
+
+        {/* Counters */}
+        {view === "week" && (
+          <div className="flex gap-3 flex-wrap flex-shrink-0">
+            <EditableCounter label="Places restantes ce mois" value={monthAvailable}
+              sub={monthData ? `sur ${monthData.totalSlots} · cliquer` : "Cliquer pour définir"}
+              color="blue" onSave={saveMonthlyTotal} />
+            <EditableCounter label="Places cette semaine" value={Math.max(0, weeklyLimit - weekCount)}
+              sub={`${weekCount} planifié${weekCount !== 1 ? "s" : ""} · limite ${weeklyLimit} · cliquer`}
+              color="green" onSave={saveWeeklyLimit} />
+          </div>
+        )}
+
+        {/* Calendar */}
+        {loading ? (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+          </div>
+
+        ) : view === "week" ? (
+
+          /* ══ WEEK VIEW ══ */
+          <div className="flex-1 bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col min-h-0">
+
+            {/* Day headers */}
+            <div className="flex border-b-2 border-gray-200 dark:border-gray-700 bg-gray-50/50 flex-shrink-0">
+              <div className="w-14 flex-shrink-0 border-r border-gray-200 dark:border-gray-700" />
+              {days.map((day, di) => {
+                const dk = dateKey(day);
+                const isToday = dk === todayKey;
+                return (
+                  <div key={dk} className={cn("flex-1 min-w-0 flex flex-col items-center py-2.5 border-r border-gray-100 dark:border-gray-800 last:border-r-0", isToday && "bg-blue-50/60")}>
+                    <span className={cn("text-[10px] font-bold uppercase tracking-widest", isToday ? "text-blue-500" : "text-gray-400")}>
+                      {DAYS_SHORT[di]}
+                    </span>
+                    <span className={cn("mt-1 flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold", isToday ? "bg-blue-500 text-white shadow-sm" : "text-gray-800 dark:text-gray-200")}>
+                      {day.getDate()}
+                    </span>
+                  </div>
+                );
+              })}
+              <div className="w-44 flex-shrink-0 border-l-2 border-blue-100 dark:border-blue-900/50 bg-blue-50/30 flex items-center justify-between px-3 py-2.5">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-blue-500">File d'attente</span>
+                <button
+                  onClick={() => { setFormError(""); setModal("queue"); }}
+                  className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-white hover:bg-blue-600 transition-colors shadow-sm"
+                >
+                  <Plus className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+
+            {/* Scrollable body */}
+            <div className="flex flex-1 overflow-y-auto min-h-0">
+              {/* Time labels */}
+              <div className="w-14 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-gray-50/30">
+                {TIME_SLOTS.map(t => (
+                  <div key={t} className="h-14 flex items-start justify-center pt-1.5 border-t border-gray-100 dark:border-gray-800">
+                    <span className="text-[10px] font-medium text-gray-400">{t}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Day columns */}
+              {days.map(day => {
+                const dk = dateKey(day);
+                const isToday = dk === todayKey;
+                return (
+                  <div key={dk} className={cn("flex-1 min-w-0 border-r border-gray-100 dark:border-gray-800 last:border-r-0", isToday && "bg-blue-50/20")}>
+                    {TIME_SLOTS.map(time => {
+                      const slotId = `${dk}:${time}`;
+                      const slotPlacements = bySlot.get(slotId) ?? [];
+                      return (
+                        <TimeSlot
+                          key={time}
+                          slotId={slotId}
+                          dateStr={dk}
+                          time={time}
+                          onClickSlot={() => openFromSlot(dk, time)}
+                          isOver={dropTarget === slotId}
+                          onDragOver={setDropTarget}
+                          onDragLeave={() => setDropTarget(null)}
+                          onDrop={handleDrop}
+                        >
+                          {slotPlacements.map(p => (
+                            <PlacementChip
+                              key={p.id}
+                              placement={p}
+                              onDragStart={handleDragStart}
+                              onClickChip={e => { e.stopPropagation(); openDetail(p); }}
+                            />
+                          ))}
+                        </TimeSlot>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+
+              {/* Queue column */}
+              <div className="w-44 flex-shrink-0 border-l-2 border-blue-100 dark:border-blue-900/50 bg-blue-50/20 overflow-y-auto p-2 space-y-1.5">
+                {students.length === 0 ? (
+                  <div className="h-24 flex flex-col items-center justify-center text-center gap-1">
+                    <p className="text-xs text-gray-400">Aucun élève</p>
+                    <button onClick={() => setModal("queue")} className="text-xs text-blue-500 underline">Ajouter</button>
+                  </div>
+                ) : (
+                  students.map(s => (
+                    <QueueCard
+                      key={s.id}
+                      student={s}
+                      onClickCard={() => openFromQueue(s)}
+                      onDragStart={handleDragStart}
+                    />
+                  ))
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Counters */}
-          {view === "week" && (
-            <div className="flex gap-3 flex-wrap flex-shrink-0">
-              <EditableCounter label="Places restantes ce mois" value={monthAvailable}
-                sub={monthData ? `sur ${monthData.totalSlots} · cliquer` : "Cliquer pour définir"}
-                color="blue" onSave={saveMonthlyTotal} />
-              <EditableCounter label="Places cette semaine" value={Math.max(0, weeklyLimit - weekCount)}
-                sub={`${weekCount} planifié${weekCount !== 1 ? "s" : ""} · limite ${weeklyLimit} · cliquer`}
-                color="green" onSave={saveWeeklyLimit} />
+        ) : (
+
+          /* ══ MONTH VIEW ══ */
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div className="grid grid-cols-7 border-b-2 border-gray-200 dark:border-gray-700 bg-gray-50/50">
+              {DAYS_SHORT.map(d => (
+                <div key={d} className="py-2.5 text-center text-[10px] font-bold uppercase tracking-widest text-gray-400">{d}</div>
+              ))}
             </div>
-          )}
-
-          {/* Calendar */}
-          {loading ? (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-            </div>
-
-          ) : view === "week" ? (
-
-            /* ══ WEEK VIEW ══ */
-            <div className="flex-1 bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col min-h-0">
-
-              {/* Day headers */}
-              <div className="flex border-b-2 border-gray-200 dark:border-gray-700 bg-gray-50/50 flex-shrink-0">
-                <div className="w-14 flex-shrink-0 border-r border-gray-200 dark:border-gray-700" />
-                {days.map((day, di) => {
-                  const dk = dateKey(day);
-                  const isToday = dk === todayKey;
-                  return (
-                    <div key={dk} className={cn("flex-1 min-w-0 flex flex-col items-center py-2.5 border-r border-gray-100 dark:border-gray-800 last:border-r-0", isToday && "bg-blue-50/60")}>
-                      <span className={cn("text-[10px] font-bold uppercase tracking-widest", isToday ? "text-blue-500" : "text-gray-400")}>
-                        {DAYS_SHORT[di]}
-                      </span>
-                      <span className={cn("mt-1 flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold", isToday ? "bg-blue-500 text-white shadow-sm" : "text-gray-800 dark:text-gray-200")}>
-                        {day.getDate()}
-                      </span>
-                    </div>
-                  );
-                })}
-                <div className="w-44 flex-shrink-0 border-l-2 border-blue-100 dark:border-blue-900/50 bg-blue-50/30 flex items-center justify-between px-3 py-2.5">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-blue-500">File d'attente</span>
-                  <button
-                    onClick={() => { setFormError(""); setModal("queue"); }}
-                    className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-white hover:bg-blue-600 transition-colors shadow-sm"
+            <div className="grid grid-cols-7">
+              {Array.from({ length: getFirstOffset(curYear, curMonth) }).map((_, i) => (
+                <div key={`e-${i}`} className="h-24 border-b border-r border-gray-50 dark:border-gray-800 bg-gray-50/30" />
+              ))}
+              {Array.from({ length: getDaysInMonth(curYear, curMonth) }).map((_, i) => {
+                const day = i + 1;
+                const dk = `${curYear}-${fmt2(curMonth)}-${fmt2(day)}`;
+                const dayPlacements = placements.filter(p => p.date.slice(0,10) === dk);
+                const isToday = dk === todayKey;
+                return (
+                  <div key={day}
+                    onClick={() => { setView("week"); setWStart(weekStartOf(new Date(curYear, curMonth-1, day))); }}
+                    className={cn("h-24 border-b border-r border-gray-100 dark:border-gray-800 p-1.5 cursor-pointer hover:bg-blue-50/30 transition-colors", isToday && "bg-blue-50/40")}
                   >
-                    <Plus className="h-3 w-3" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Scrollable body */}
-              <div className="flex flex-1 overflow-y-auto min-h-0">
-                {/* Time labels */}
-                <div className="w-14 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-gray-50/30">
-                  {TIME_SLOTS.map(t => (
-                    <div key={t} className="h-14 flex items-start justify-center pt-1.5 border-t border-gray-100 dark:border-gray-800">
-                      <span className="text-[10px] font-medium text-gray-400">{t}</span>
+                    <span className={cn("inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold", isToday ? "bg-blue-500 text-white" : "text-gray-700 dark:text-gray-300")}>
+                      {day}
+                    </span>
+                    <div className="mt-0.5 space-y-0.5">
+                      {dayPlacements.slice(0, 2).map(p => (
+                        <div key={p.id}
+                          onClick={e => { e.stopPropagation(); openDetail(p); }}
+                          className="text-[9px] font-semibold text-white bg-blue-500 rounded px-1 py-0.5 truncate"
+                        >
+                          {p.time} {p.student.lastName}
+                        </div>
+                      ))}
+                      {dayPlacements.length > 2 && <div className="text-[9px] text-gray-400">+{dayPlacements.length - 2}</div>}
                     </div>
-                  ))}
-                </div>
-
-                {/* Day columns */}
-                {days.map(day => {
-                  const dk = dateKey(day);
-                  const isToday = dk === todayKey;
-                  return (
-                    <div key={dk} className={cn("flex-1 min-w-0 border-r border-gray-100 dark:border-gray-800 last:border-r-0", isToday && "bg-blue-50/20")}>
-                      {TIME_SLOTS.map(time => {
-                        const slotId = `${dk}:${time}`;
-                        const slotPlacements = bySlot.get(slotId) ?? [];
-                        return (
-                          <TimeSlot
-                            key={time}
-                            slotId={slotId}
-                            dateStr={dk}
-                            time={time}
-                            onClickSlot={() => openFromSlot(dk, time)}
-                            dragJustEndedRef={dragJustEndedRef}
-                          >
-                            {slotPlacements.map(p => (
-                              <PlacementChip
-                                key={p.id}
-                                placement={p}
-                                dragJustEndedRef={dragJustEndedRef}
-                                onClickChip={e => { e.stopPropagation(); openDetail(p); }}
-                              />
-                            ))}
-                          </TimeSlot>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-
-                {/* Queue column */}
-                <div className="w-44 flex-shrink-0 border-l-2 border-blue-100 dark:border-blue-900/50 bg-blue-50/20 overflow-y-auto p-2 space-y-1.5">
-                  {students.length === 0 ? (
-                    <div className="h-24 flex flex-col items-center justify-center text-center gap-1">
-                      <p className="text-xs text-gray-400">Aucun élève</p>
-                      <button onClick={() => setModal("queue")} className="text-xs text-blue-500 underline">Ajouter</button>
-                    </div>
-                  ) : (
-                    students.map(s => (
-                      <QueueCard key={s.id} student={s} onClickCard={() => openFromQueue(s)} dragJustEndedRef={dragJustEndedRef} />
-                    ))
-                  )}
-                </div>
-              </div>
+                  </div>
+                );
+              })}
             </div>
+          </div>
+        )}
+      </div>
 
-          ) : (
-
-            /* ══ MONTH VIEW ══ */
-            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-              <div className="grid grid-cols-7 border-b-2 border-gray-200 dark:border-gray-700 bg-gray-50/50">
-                {DAYS_SHORT.map(d => (
-                  <div key={d} className="py-2.5 text-center text-[10px] font-bold uppercase tracking-widest text-gray-400">{d}</div>
-                ))}
-              </div>
-              <div className="grid grid-cols-7">
-                {Array.from({ length: getFirstOffset(curYear, curMonth) }).map((_, i) => (
-                  <div key={`e-${i}`} className="h-24 border-b border-r border-gray-50 dark:border-gray-800 bg-gray-50/30" />
-                ))}
-                {Array.from({ length: getDaysInMonth(curYear, curMonth) }).map((_, i) => {
-                  const day = i + 1;
-                  const dk = `${curYear}-${fmt2(curMonth)}-${fmt2(day)}`;
-                  const dayPlacements = placements.filter(p => p.date.slice(0,10) === dk);
-                  const isToday = dk === todayKey;
-                  return (
-                    <div key={day}
-                      onClick={() => { setView("week"); setWStart(weekStartOf(new Date(curYear, curMonth-1, day))); }}
-                      className={cn("h-24 border-b border-r border-gray-100 dark:border-gray-800 p-1.5 cursor-pointer hover:bg-blue-50/30 transition-colors", isToday && "bg-blue-50/40")}
-                    >
-                      <span className={cn("inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold", isToday ? "bg-blue-500 text-white" : "text-gray-700 dark:text-gray-300")}>
-                        {day}
-                      </span>
-                      <div className="mt-0.5 space-y-0.5">
-                        {dayPlacements.slice(0, 2).map(p => (
-                          <div key={p.id}
-                            onClick={e => { e.stopPropagation(); openDetail(p); }}
-                            className="text-[9px] font-semibold text-white bg-blue-500 rounded px-1 py-0.5 truncate"
-                          >
-                            {p.time} {p.student.lastName}
-                          </div>
-                        ))}
-                        {dayPlacements.length > 2 && <div className="text-[9px] text-gray-400">+{dayPlacements.length - 2}</div>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Drag ghost — z-index 999 by default in dnd-kit */}
-        <DragOverlay dropAnimation={null}>
-          {activeDrag?.kind === "student" && (
-            <div className="bg-white rounded-xl shadow-2xl border border-blue-200 p-2 w-40 rotate-2 opacity-95 pointer-events-none">
-              <div className="flex items-center gap-1.5">
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-600 text-[10px] font-bold">
-                  {initials(activeDrag.student)}
-                </div>
-                <span className="text-[11px] font-semibold text-gray-900 truncate">
-                  {fullName(activeDrag.student)}
-                </span>
-              </div>
-            </div>
-          )}
-          {activeDrag?.kind === "placement" && (
-            <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white text-[10px] font-semibold rounded-lg px-2 py-1.5 shadow-2xl rotate-1 opacity-95 pointer-events-none">
-              {fullName(activeDrag.placement.student)}
-            </div>
-          )}
-        </DragOverlay>
-
-      </DndContext>
-
-      {/* ══ Modals (outside DndContext — intentional) ══ */}
+      {/* ══ Modals ══ */}
 
       <Modal open={modal === "add"} onClose={closeModal} title={queueStu ? `Placer ${fullName(queueStu)}` : "Placer un élève"}>
         <form onSubmit={submitPlacement} className="space-y-4 mt-2">
