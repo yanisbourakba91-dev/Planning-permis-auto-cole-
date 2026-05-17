@@ -114,9 +114,11 @@ function weekLabel(days: Date[]): string {
 function QueueCard({
   student,
   onClickCard,
+  dragJustEndedRef,
 }: {
   student: Student;
   onClickCard: () => void;
+  dragJustEndedRef: React.RefObject<boolean>;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
@@ -124,40 +126,35 @@ function QueueCard({
       data: { kind: "student", student } satisfies DragData,
     });
 
+  function handleClick() {
+    if (dragJustEndedRef.current) return;
+    onClickCard();
+  }
+
   return (
     <div
       ref={setNodeRef}
-      style={transform ? { transform: CSS.Translate.toString(transform) } : undefined}
+      {...listeners}
+      {...attributes}
+      style={{ touchAction: "none", ...(transform ? { transform: CSS.Translate.toString(transform) } : {}) }}
       className={cn(
         "bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700",
-        "flex items-center gap-2 px-2 py-1.5 select-none",
+        "flex items-center gap-2 px-2 py-1.5 select-none cursor-grab active:cursor-grabbing",
         isDragging && "opacity-40"
       )}
+      onClick={handleClick}
     >
-      {/* ── DRAG HANDLE: avatar circle ── */}
-      <div
-        {...listeners}
-        {...attributes}
-        style={{ touchAction: "none" }}
-        title="Glisser vers un créneau"
-        className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 text-[10px] font-bold flex-shrink-0 cursor-grab active:cursor-grabbing"
-      >
+      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 text-[10px] font-bold flex-shrink-0 flex-shrink-0">
         {initials(student)}
       </div>
-
-      {/* ── CLICK AREA: student info ── */}
-      <button
-        type="button"
-        onClick={onClickCard}
-        className="min-w-0 flex-1 text-left leading-tight"
-      >
+      <div className="min-w-0 flex-1 leading-tight">
         <p className="text-[11px] font-semibold text-gray-900 dark:text-gray-100 truncate">
           {fullName(student)}
         </p>
         <p className="text-[9px] text-gray-400 truncate">
           {student.drivingHours}h · {drivingDate(student.lastDrivingDate)}
         </p>
-      </button>
+      </div>
     </div>
   );
 }
@@ -682,7 +679,7 @@ export default function CalendrierPage() {
                     </div>
                   ) : (
                     students.map(s => (
-                      <QueueCard key={s.id} student={s} onClickCard={() => openFromQueue(s)} />
+                      <QueueCard key={s.id} student={s} onClickCard={() => openFromQueue(s)} dragJustEndedRef={dragJustEndedRef} />
                     ))
                   )}
                 </div>
