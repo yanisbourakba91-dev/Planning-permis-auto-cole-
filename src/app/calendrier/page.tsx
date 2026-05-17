@@ -88,32 +88,59 @@ function weekLabel(days: Date[]): string {
 }
 
 /* ═══════════════════════════════════════
-   DRAG & DROP COMPONENTS — HTML5 native
-   dragstart/drop are mutually exclusive with click,
-   so no click-suppression hacks needed.
+   DRAG & DROP COMPONENTS
+   Desktop: HTML5 native DnD (draggable attr)
+   Mobile:  onTouchMove/End + elementFromPoint
+   TimeSlot: data-slot/data-date/data-time attrs for touch hit-test
 ═══════════════════════════════════════ */
 
 function QueueCard({
   student,
   onClickCard,
   onDragStart,
+  onTouchHover,
+  onTouchDrop,
 }: {
   student: Student;
   onClickCard: () => void;
   onDragStart: (data: DragData) => void;
+  onTouchHover: (x: number, y: number, self: HTMLElement) => void;
+  onTouchDrop: (x: number, y: number, self: HTMLElement) => void;
 }) {
   const [dragging, setDragging] = useState(false);
+  const touchMoved = useRef(false);
+
   return (
     <div
       draggable
+      /* ── Desktop HTML5 DnD ── */
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", "1"); // required by Firefox
+        e.dataTransfer.setData("text/plain", "1");
         setDragging(true);
         onDragStart({ kind: "student", student });
       }}
       onDragEnd={() => setDragging(false)}
-      onClick={onClickCard}
+      /* ── Mobile touch DnD ── */
+      onTouchStart={() => {
+        touchMoved.current = false;
+        onDragStart({ kind: "student", student });
+      }}
+      onTouchMove={(e) => {
+        touchMoved.current = true;
+        const t = e.touches[0];
+        onTouchHover(t.clientX, t.clientY, e.currentTarget);
+      }}
+      onTouchEnd={(e) => {
+        const t = e.changedTouches[0];
+        onTouchDrop(t.clientX, t.clientY, e.currentTarget);
+        // touchMoved reset happens in onClick (after browser synthesises click)
+      }}
+      onClick={() => {
+        if (touchMoved.current) { touchMoved.current = false; return; }
+        onClickCard();
+      }}
+      style={{ touchAction: "none" }}
       className={cn(
         "bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700",
         "flex items-center gap-2 px-2 py-1.5 select-none cursor-grab active:cursor-grabbing",
@@ -139,12 +166,18 @@ function PlacementChip({
   placement,
   onClickChip,
   onDragStart,
+  onTouchHover,
+  onTouchDrop,
 }: {
   placement: Placement;
   onClickChip: (e: React.MouseEvent) => void;
   onDragStart: (data: DragData) => void;
+  onTouchHover: (x: number, y: number, self: HTMLElement) => void;
+  onTouchDrop: (x: number, y: number, self: HTMLElement) => void;
 }) {
   const [dragging, setDragging] = useState(false);
+  const touchMoved = useRef(false);
+
   return (
     <div
       draggable
@@ -155,7 +188,25 @@ function PlacementChip({
         onDragStart({ kind: "placement", placement });
       }}
       onDragEnd={() => setDragging(false)}
-      onClick={(e) => { e.stopPropagation(); onClickChip(e); }}
+      onTouchStart={() => {
+        touchMoved.current = false;
+        onDragStart({ kind: "placement", placement });
+      }}
+      onTouchMove={(e) => {
+        touchMoved.current = true;
+        const t = e.touches[0];
+        onTouchHover(t.clientX, t.clientY, e.currentTarget);
+      }}
+      onTouchEnd={(e) => {
+        const t = e.changedTouches[0];
+        onTouchDrop(t.clientX, t.clientY, e.currentTarget);
+      }}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (touchMoved.current) { touchMoved.current = false; return; }
+        onClickChip(e);
+      }}
+      style={{ touchAction: "none" }}
       className={cn(
         "absolute inset-x-0.5 top-0.5 bottom-0.5 flex items-center px-1.5 rounded-lg z-10 select-none",
         "bg-gradient-to-br from-blue-500 to-blue-600 text-white text-[10px] font-semibold shadow-sm",
@@ -168,6 +219,7 @@ function PlacementChip({
   );
 }
 
+/* TimeSlot — data-* attrs enable touch hit-test via elementFromPoint */
 function TimeSlot({
   slotId,
   dateStr,
@@ -186,15 +238,16 @@ function TimeSlot({
   onClickSlot: () => void;
   isOver: boolean;
   onDragOver: (id: string) => void;
-  onDragLeave: (id: string) => void;
+  onDragLeave: () => void;
   onDrop: (dateStr: string, time: string) => void;
 }) {
   return (
     <div
+      data-slot="1"
+      data-date={dateStr}
+      data-time={time}
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; onDragOver(slotId); }}
-      onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node)) onDragLeave(slotId);
-      }}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) onDragLeave(); }}
       onDrop={(e) => { e.preventDefault(); onDrop(dateStr, time); }}
       onClick={onClickSlot}
       className={cn(
@@ -298,10 +351,7 @@ export default function CalendrierPage() {
   function handleDragStart(data: DragData) {
     dragSrcRef.current = data;
   }
-  function handleDragEnd() {
-    dragSrcRef.current = null;
-    setDropTarget(null);
-  }
+
   function handleDrop(dateStr: string, time: string) {
     const src = dragSrcRef.current;
     dragSrcRef.current = null;
@@ -324,6 +374,30 @@ export default function CalendrierPage() {
           .then(() => fetchData())
           .catch(() => { /* silent */ });
       }
+    }
+  }
+
+  /* Touch: find slot underneath finger via elementFromPoint */
+  function findSlotAt(x: number, y: number, self: HTMLElement) {
+    self.style.visibility = "hidden";
+    const el = document.elementFromPoint(x, y);
+    self.style.visibility = "";
+    return (el as HTMLElement | null)?.closest("[data-slot]") as HTMLElement | null;
+  }
+
+  function handleTouchHover(x: number, y: number, self: HTMLElement) {
+    const slot = findSlotAt(x, y, self);
+    const id = slot ? `${slot.dataset.date}:${slot.dataset.time}` : null;
+    setDropTarget(id);
+  }
+
+  function handleTouchDrop(x: number, y: number, self: HTMLElement) {
+    const slot = findSlotAt(x, y, self);
+    setDropTarget(null);
+    if (slot?.dataset.date && slot?.dataset.time) {
+      handleDrop(slot.dataset.date, slot.dataset.time);
+    } else {
+      dragSrcRef.current = null;
     }
   }
 
@@ -600,6 +674,8 @@ export default function CalendrierPage() {
                               key={p.id}
                               placement={p}
                               onDragStart={handleDragStart}
+                              onTouchHover={handleTouchHover}
+                              onTouchDrop={handleTouchDrop}
                               onClickChip={e => { e.stopPropagation(); openDetail(p); }}
                             />
                           ))}
@@ -624,6 +700,8 @@ export default function CalendrierPage() {
                       student={s}
                       onClickCard={() => openFromQueue(s)}
                       onDragStart={handleDragStart}
+                      onTouchHover={handleTouchHover}
+                      onTouchDrop={handleTouchDrop}
                     />
                   ))
                 )}
