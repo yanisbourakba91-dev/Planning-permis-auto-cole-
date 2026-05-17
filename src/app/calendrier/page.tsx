@@ -77,54 +77,84 @@ function Draggable({
   className?: string;
   children: React.ReactNode;
 }) {
-  const ref    = useRef<HTMLDivElement>(null);
-  const state  = useRef({ active: false, moved: false, startX: 0, startY: 0 });
+  const ref   = useRef<HTMLDivElement>(null);
+  const state = useRef<{ active: boolean; moved: boolean; startX: number; startY: number; pid: number }>({
+    active: false, moved: false, startX: 0, startY: 0, pid: -1,
+  });
   const [dragging, setDragging] = useState(false);
 
-  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    // Only left-button / primary touch
-    if (e.button !== 0 && e.pointerType !== "touch" && e.pointerType !== "pen") return;
-    e.preventDefault();               // stop scroll on touch, stop text-select on mouse
-    e.currentTarget.setPointerCapture(e.pointerId); // capture so events keep coming
-    state.current = { active: true, moved: false, startX: e.clientX, startY: e.clientY };
-    cbs.current.onDragStart(data);
-  }
+  // Always-fresh refs so native listeners (registered once) never have stale closures
+  const dataRef  = useRef(data);  dataRef.current  = data;
+  const onTapRef = useRef(onTap); onTapRef.current = onTap;
 
-  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
-    if (!state.current.active) return;
-    const dx = Math.abs(e.clientX - state.current.startX);
-    const dy = Math.abs(e.clientY - state.current.startY);
-    if (!state.current.moved && (dx > 6 || dy > 6)) {
-      state.current.moved = true;
-      setDragging(true);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const elSafe: HTMLDivElement = el;
+
+    function onDown(e: PointerEvent) {
+      if (e.button !== 0 && e.pointerType !== "touch" && e.pointerType !== "pen") return;
+      e.preventDefault();
+      e.stopPropagation();
+      elSafe.setPointerCapture(e.pointerId);
+      state.current = { active: true, moved: false, startX: e.clientX, startY: e.clientY, pid: e.pointerId };
+      cbs.current.onDragStart(dataRef.current);
     }
-    if (state.current.moved) cbs.current.onHover(e.clientX, e.clientY, e.currentTarget);
-  }
 
-  function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
-    if (!state.current.active) return;
-    const moved = state.current.moved;
-    state.current = { active: false, moved: false, startX: 0, startY: 0 };
-    setDragging(false);
-    if (moved) cbs.current.onDrop(e.clientX, e.clientY, e.currentTarget);
-    else       onTap();
-  }
+    function onMove(e: PointerEvent) {
+      if (!state.current.active || e.pointerId !== state.current.pid) return;
+      // preventDefault here is the KEY fix for iOS: stops Safari from firing
+      // pointercancel (which it does when it detects a scroll gesture)
+      e.preventDefault();
+      const dx = Math.abs(e.clientX - state.current.startX);
+      const dy = Math.abs(e.clientY - state.current.startY);
+      if (!state.current.moved && (dx > 6 || dy > 6)) {
+        state.current.moved = true;
+        setDragging(true);
+      }
+      if (state.current.moved) cbs.current.onHover(e.clientX, e.clientY, elSafe);
+    }
 
-  function onPointerCancel() {
-    if (!state.current.active) return;
-    state.current = { active: false, moved: false, startX: 0, startY: 0 };
-    setDragging(false);
-    cbs.current.onCancel();
-  }
+    function onUp(e: PointerEvent) {
+      if (!state.current.active || e.pointerId !== state.current.pid) return;
+      const moved = state.current.moved;
+      state.current = { active: false, moved: false, startX: 0, startY: 0, pid: -1 };
+      setDragging(false);
+      if (moved) cbs.current.onDrop(e.clientX, e.clientY, elSafe);
+      else       onTapRef.current();
+    }
+
+    function onCancel() {
+      if (!state.current.active) return;
+      state.current = { active: false, moved: false, startX: 0, startY: 0, pid: -1 };
+      setDragging(false);
+      cbs.current.onCancel();
+    }
+
+    // passive: false is mandatory — without it preventDefault() is ignored on iOS Safari
+    elSafe.addEventListener("pointerdown",   onDown,   { passive: false });
+    elSafe.addEventListener("pointermove",   onMove,   { passive: false });
+    elSafe.addEventListener("pointerup",     onUp);
+    elSafe.addEventListener("pointercancel", onCancel);
+
+    return () => {
+      elSafe.removeEventListener("pointerdown",   onDown);
+      elSafe.removeEventListener("pointermove",   onMove);
+      elSafe.removeEventListener("pointerup",     onUp);
+      elSafe.removeEventListener("pointercancel", onCancel);
+    };
+  }, [cbs]); // cbs ref is stable; dataRef/onTapRef updated synchronously above
 
   return (
     <div
       ref={ref}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerCancel}
-      style={{ touchAction: "none", userSelect: "none" }}
+      style={{
+        touchAction: "none",
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        // Disable iOS long-press callout (would cancel the drag)
+        WebkitTouchCallout: "none",
+      } as React.CSSProperties}
       className={cn("cursor-grab active:cursor-grabbing", dragging && "opacity-40", className)}
     >
       {children}
