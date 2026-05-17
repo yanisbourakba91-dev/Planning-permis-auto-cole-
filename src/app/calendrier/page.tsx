@@ -52,9 +52,9 @@ function weekLabel(days: Date[]) {
 }
 
 /* ═══════════════════════════════════════════════════════
-   POINTER-EVENT DRAG — works on mouse + touch + stylus
-   React's onPointerDown is NOT passive → preventDefault works.
-   setPointerCapture keeps events flowing even after finger leaves element.
+   DRAG — touchstart/touchmove/touchend natifs (passive:false)
+   + mousedown/mousemove/mouseup sur window pour desktop.
+   Pas de pointer events, pas de librairie.
 ═══════════════════════════════════════════════════════ */
 
 type DragCbs = {
@@ -77,8 +77,8 @@ function Draggable({
   className?: string;
   children: React.ReactNode;
 }) {
-  const ref      = useRef<HTMLDivElement>(null);
-  const state    = useRef({ active: false, moved: false, startX: 0, startY: 0 });
+  const ref   = useRef<HTMLDivElement>(null);
+  const state = useRef({ active: false, moved: false, startX: 0, startY: 0 });
   const [dragging, setDragging] = useState(false);
 
   const dataRef  = useRef(data);  dataRef.current  = data;
@@ -87,64 +87,90 @@ function Draggable({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const elSafe: HTMLDivElement = el;
+    const node: HTMLDivElement = el;
 
-    // pointermove / pointerup are on WINDOW, not the element.
-    // Reason: on iOS Safari, setPointerCapture can silently fail and element-level
-    // pointermove never fires. Window-level listeners always fire, and registering
-    // them with { passive: false } lets us call preventDefault() which tells iOS
-    // "this is NOT a scroll" → no pointercancel → drag keeps going.
-    function onMove(e: PointerEvent) {
+    /* ── helpers ── */
+    function begin(x: number, y: number) {
+      state.current = { active: true, moved: false, startX: x, startY: y };
+      cbs.current.onDragStart(dataRef.current);
+    }
+    function move(x: number, y: number) {
       if (!state.current.active) return;
-      e.preventDefault(); // blocks iOS scroll hijack
-      const dx = Math.abs(e.clientX - state.current.startX);
-      const dy = Math.abs(e.clientY - state.current.startY);
-      if (!state.current.moved && (dx > 6 || dy > 6)) {
+      const dx = Math.abs(x - state.current.startX);
+      const dy = Math.abs(y - state.current.startY);
+      if (!state.current.moved && (dx > 5 || dy > 5)) {
         state.current.moved = true;
         setDragging(true);
       }
-      if (state.current.moved) cbs.current.onHover(e.clientX, e.clientY, elSafe);
+      if (state.current.moved) cbs.current.onHover(x, y, node);
     }
-
-    function onUp(e: PointerEvent) {
+    function end(x: number, y: number) {
       if (!state.current.active) return;
-      const moved = state.current.moved;
+      const wasMoved = state.current.moved;
       state.current = { active: false, moved: false, startX: 0, startY: 0 };
       setDragging(false);
-      detach();
-      if (moved) cbs.current.onDrop(e.clientX, e.clientY, elSafe);
-      else       onTapRef.current();
+      if (wasMoved) cbs.current.onDrop(x, y, node);
+      else          onTapRef.current();
     }
-
-    function onCancel() {
+    function cancel() {
       if (!state.current.active) return;
       state.current = { active: false, moved: false, startX: 0, startY: 0 };
       setDragging(false);
-      detach();
       cbs.current.onCancel();
     }
 
-    function detach() {
-      window.removeEventListener("pointermove",   onMove);
-      window.removeEventListener("pointerup",     onUp);
-      window.removeEventListener("pointercancel", onCancel);
+    /* ── TOUCH (iOS / Android) ──
+       passive:false obligatoire → e.preventDefault() fonctionne
+       touch-action:none CSS → le browser ne tente pas de scroller
+       Les events touch suivent automatiquement le doigt même hors de l'élément */
+    function onTStart(e: TouchEvent) {
+      if (e.touches.length !== 1) return;
+      e.preventDefault(); // bloque scroll + long-press callout iOS
+      const t = e.touches[0];
+      begin(t.clientX, t.clientY);
     }
+    function onTMove(e: TouchEvent) {
+      if (!state.current.active || e.touches.length !== 1) return;
+      e.preventDefault(); // empêche iOS de reclasser ce touch comme scroll
+      const t = e.touches[0];
+      move(t.clientX, t.clientY);
+    }
+    function onTEnd(e: TouchEvent) {
+      const t = e.changedTouches[0];
+      end(t.clientX, t.clientY);
+    }
+    function onTCancel() { cancel(); }
 
-    function onDown(e: PointerEvent) {
-      if (e.button !== 0 && e.pointerType !== "touch" && e.pointerType !== "pen") return;
+    /* ── MOUSE (desktop) ──
+       mousemove/mouseup sur window → le curseur peut sortir de l'élément */
+    function onMMove(e: MouseEvent) { move(e.clientX, e.clientY); }
+    function onMUp(e: MouseEvent) {
+      window.removeEventListener("mousemove", onMMove);
+      window.removeEventListener("mouseup",   onMUp);
+      end(e.clientX, e.clientY);
+    }
+    function onMDown(e: MouseEvent) {
+      if (e.button !== 0) return;
       e.preventDefault();
-      state.current = { active: true, moved: false, startX: e.clientX, startY: e.clientY };
-      cbs.current.onDragStart(dataRef.current);
-      // Attach global listeners AFTER pointerdown so they're fresh each drag
-      window.addEventListener("pointermove",   onMove,   { passive: false });
-      window.addEventListener("pointerup",     onUp);
-      window.addEventListener("pointercancel", onCancel);
+      begin(e.clientX, e.clientY);
+      window.addEventListener("mousemove", onMMove);
+      window.addEventListener("mouseup",   onMUp);
     }
 
-    elSafe.addEventListener("pointerdown", onDown, { passive: false });
+    node.addEventListener("touchstart",  onTStart,  { passive: false });
+    node.addEventListener("touchmove",   onTMove,   { passive: false });
+    node.addEventListener("touchend",    onTEnd);
+    node.addEventListener("touchcancel", onTCancel);
+    node.addEventListener("mousedown",   onMDown);
+
     return () => {
-      elSafe.removeEventListener("pointerdown", onDown);
-      detach();
+      node.removeEventListener("touchstart",  onTStart);
+      node.removeEventListener("touchmove",   onTMove);
+      node.removeEventListener("touchend",    onTEnd);
+      node.removeEventListener("touchcancel", onTCancel);
+      node.removeEventListener("mousedown",   onMDown);
+      window.removeEventListener("mousemove", onMMove);
+      window.removeEventListener("mouseup",   onMUp);
     };
   }, [cbs]);
 
@@ -152,12 +178,12 @@ function Draggable({
     <div
       ref={ref}
       style={{
-        touchAction: "none",
-        userSelect: "none",
-        WebkitUserSelect: "none",
-        WebkitTouchCallout: "none",
+        touchAction:          "none",   // CSS dit au browser: ne gère pas les gestes
+        userSelect:           "none",
+        WebkitUserSelect:     "none",
+        WebkitTouchCallout:   "none",   // désactive le menu long-press iOS
       } as React.CSSProperties}
-      className={cn("cursor-grab active:cursor-grabbing", dragging && "opacity-40", className)}
+      className={cn("cursor-grab active:cursor-grabbing select-none", dragging && "opacity-40", className)}
     >
       {children}
     </div>
