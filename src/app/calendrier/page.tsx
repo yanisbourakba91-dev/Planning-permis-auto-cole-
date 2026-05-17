@@ -217,17 +217,24 @@ function TimeSlot({
   time,
   children,
   onClickSlot,
+  dragJustEndedRef,
 }: {
   slotId: string;
   dateStr: string;
   time: string;
   children: React.ReactNode;
   onClickSlot: () => void;
+  dragJustEndedRef: React.RefObject<boolean>;
 }) {
   const { isOver, setNodeRef } = useDroppable({
     id: slotId,
     data: { dateStr, time },
   });
+
+  function handleClick() {
+    if (dragJustEndedRef.current) return; // suppress click fired after drop
+    onClickSlot();
+  }
 
   return (
     <div
@@ -238,7 +245,7 @@ function TimeSlot({
           ? "bg-blue-100 dark:bg-blue-900/30 ring-2 ring-inset ring-blue-500"
           : "hover:bg-gray-50/80 dark:hover:bg-gray-800/30"
       )}
-      onClick={onClickSlot}
+      onClick={handleClick}
     >
       {children}
     </div>
@@ -649,6 +656,7 @@ export default function CalendrierPage() {
                             dateStr={dk}
                             time={time}
                             onClickSlot={() => openFromSlot(dk, time)}
+                            dragJustEndedRef={dragJustEndedRef}
                           >
                             {slotPlacements.map(p => (
                               <PlacementChip
