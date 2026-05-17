@@ -9,7 +9,8 @@ import {
   useDroppable,
   useSensor,
   useSensors,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
@@ -331,9 +332,9 @@ export default function CalendrierPage() {
     localStorage.setItem("planpermis_weekly_limit", String(v));
   }
 
-  /* Single PointerSensor — handles mouse + touch */
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+    useSensor(MouseSensor, { activationConstraint: { distance: 3 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } })
   );
 
   /* Track if a drag just ended so PlacementChip can suppress the post-drag click */
