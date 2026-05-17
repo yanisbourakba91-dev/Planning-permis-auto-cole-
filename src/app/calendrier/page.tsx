@@ -77,13 +77,10 @@ function Draggable({
   className?: string;
   children: React.ReactNode;
 }) {
-  const ref   = useRef<HTMLDivElement>(null);
-  const state = useRef<{ active: boolean; moved: boolean; startX: number; startY: number; pid: number }>({
-    active: false, moved: false, startX: 0, startY: 0, pid: -1,
-  });
+  const ref      = useRef<HTMLDivElement>(null);
+  const state    = useRef({ active: false, moved: false, startX: 0, startY: 0 });
   const [dragging, setDragging] = useState(false);
 
-  // Always-fresh refs so native listeners (registered once) never have stale closures
   const dataRef  = useRef(data);  dataRef.current  = data;
   const onTapRef = useRef(onTap); onTapRef.current = onTap;
 
@@ -92,20 +89,14 @@ function Draggable({
     if (!el) return;
     const elSafe: HTMLDivElement = el;
 
-    function onDown(e: PointerEvent) {
-      if (e.button !== 0 && e.pointerType !== "touch" && e.pointerType !== "pen") return;
-      e.preventDefault();
-      e.stopPropagation();
-      elSafe.setPointerCapture(e.pointerId);
-      state.current = { active: true, moved: false, startX: e.clientX, startY: e.clientY, pid: e.pointerId };
-      cbs.current.onDragStart(dataRef.current);
-    }
-
+    // pointermove / pointerup are on WINDOW, not the element.
+    // Reason: on iOS Safari, setPointerCapture can silently fail and element-level
+    // pointermove never fires. Window-level listeners always fire, and registering
+    // them with { passive: false } lets us call preventDefault() which tells iOS
+    // "this is NOT a scroll" → no pointercancel → drag keeps going.
     function onMove(e: PointerEvent) {
-      if (!state.current.active || e.pointerId !== state.current.pid) return;
-      // preventDefault here is the KEY fix for iOS: stops Safari from firing
-      // pointercancel (which it does when it detects a scroll gesture)
-      e.preventDefault();
+      if (!state.current.active) return;
+      e.preventDefault(); // blocks iOS scroll hijack
       const dx = Math.abs(e.clientX - state.current.startX);
       const dy = Math.abs(e.clientY - state.current.startY);
       if (!state.current.moved && (dx > 6 || dy > 6)) {
@@ -116,34 +107,46 @@ function Draggable({
     }
 
     function onUp(e: PointerEvent) {
-      if (!state.current.active || e.pointerId !== state.current.pid) return;
+      if (!state.current.active) return;
       const moved = state.current.moved;
-      state.current = { active: false, moved: false, startX: 0, startY: 0, pid: -1 };
+      state.current = { active: false, moved: false, startX: 0, startY: 0 };
       setDragging(false);
+      detach();
       if (moved) cbs.current.onDrop(e.clientX, e.clientY, elSafe);
       else       onTapRef.current();
     }
 
     function onCancel() {
       if (!state.current.active) return;
-      state.current = { active: false, moved: false, startX: 0, startY: 0, pid: -1 };
+      state.current = { active: false, moved: false, startX: 0, startY: 0 };
       setDragging(false);
+      detach();
       cbs.current.onCancel();
     }
 
-    // passive: false is mandatory — without it preventDefault() is ignored on iOS Safari
-    elSafe.addEventListener("pointerdown",   onDown,   { passive: false });
-    elSafe.addEventListener("pointermove",   onMove,   { passive: false });
-    elSafe.addEventListener("pointerup",     onUp);
-    elSafe.addEventListener("pointercancel", onCancel);
+    function detach() {
+      window.removeEventListener("pointermove",   onMove);
+      window.removeEventListener("pointerup",     onUp);
+      window.removeEventListener("pointercancel", onCancel);
+    }
 
+    function onDown(e: PointerEvent) {
+      if (e.button !== 0 && e.pointerType !== "touch" && e.pointerType !== "pen") return;
+      e.preventDefault();
+      state.current = { active: true, moved: false, startX: e.clientX, startY: e.clientY };
+      cbs.current.onDragStart(dataRef.current);
+      // Attach global listeners AFTER pointerdown so they're fresh each drag
+      window.addEventListener("pointermove",   onMove,   { passive: false });
+      window.addEventListener("pointerup",     onUp);
+      window.addEventListener("pointercancel", onCancel);
+    }
+
+    elSafe.addEventListener("pointerdown", onDown, { passive: false });
     return () => {
-      elSafe.removeEventListener("pointerdown",   onDown);
-      elSafe.removeEventListener("pointermove",   onMove);
-      elSafe.removeEventListener("pointerup",     onUp);
-      elSafe.removeEventListener("pointercancel", onCancel);
+      elSafe.removeEventListener("pointerdown", onDown);
+      detach();
     };
-  }, [cbs]); // cbs ref is stable; dataRef/onTapRef updated synchronously above
+  }, [cbs]);
 
   return (
     <div
@@ -152,7 +155,6 @@ function Draggable({
         touchAction: "none",
         userSelect: "none",
         WebkitUserSelect: "none",
-        // Disable iOS long-press callout (would cancel the drag)
         WebkitTouchCallout: "none",
       } as React.CSSProperties}
       className={cn("cursor-grab active:cursor-grabbing", dragging && "opacity-40", className)}
