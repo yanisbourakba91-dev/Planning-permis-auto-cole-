@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useDragTouch, SlotTarget } from "@/hooks/useDragTouch";
 import { useSession } from "next-auth/react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Modal } from "@/components/ui/modal";
@@ -52,16 +53,16 @@ function weekLabel(days: Date[]) {
 }
 
 /* ═══════════════════════════════════════════════════════
-   DRAG — touchstart/touchmove/touchend natifs (passive:false)
-   + mousedown/mousemove/mouseup sur window pour desktop.
-   Pas de pointer events, pas de librairie.
+   DRAG — useDragTouch (src/hooks/useDragTouch.ts)
+   Clone visuel ajouté au <body> position:fixed.
+   touchstart/touchmove/touchend natifs passive:false.
 ═══════════════════════════════════════════════════════ */
 
 type DragCbs = {
-  onDragStart: (d: DragData) => void;
-  onHover:     (x: number, y: number, self: HTMLElement) => void;
-  onDrop:      (x: number, y: number, self: HTMLElement) => void;
-  onCancel:    () => void;
+  onStart:  (d: DragData) => void;
+  onOver:   (t: SlotTarget | null) => void;
+  onDrop:   (t: SlotTarget | null, d: DragData) => void;
+  onCancel: () => void;
 };
 
 function Draggable({
@@ -77,113 +78,26 @@ function Draggable({
   className?: string;
   children: React.ReactNode;
 }) {
-  const ref   = useRef<HTMLDivElement>(null);
-  const state = useRef({ active: false, moved: false, startX: 0, startY: 0 });
-  const [dragging, setDragging] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
 
-  const dataRef  = useRef(data);  dataRef.current  = data;
-  const onTapRef = useRef(onTap); onTapRef.current = onTap;
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const node: HTMLDivElement = el;
-
-    /* ── helpers ── */
-    function begin(x: number, y: number) {
-      state.current = { active: true, moved: false, startX: x, startY: y };
-      cbs.current.onDragStart(dataRef.current);
-    }
-    function move(x: number, y: number) {
-      if (!state.current.active) return;
-      const dx = Math.abs(x - state.current.startX);
-      const dy = Math.abs(y - state.current.startY);
-      if (!state.current.moved && (dx > 5 || dy > 5)) {
-        state.current.moved = true;
-        setDragging(true);
-      }
-      if (state.current.moved) cbs.current.onHover(x, y, node);
-    }
-    function end(x: number, y: number) {
-      if (!state.current.active) return;
-      const wasMoved = state.current.moved;
-      state.current = { active: false, moved: false, startX: 0, startY: 0 };
-      setDragging(false);
-      if (wasMoved) cbs.current.onDrop(x, y, node);
-      else          onTapRef.current();
-    }
-    function cancel() {
-      if (!state.current.active) return;
-      state.current = { active: false, moved: false, startX: 0, startY: 0 };
-      setDragging(false);
-      cbs.current.onCancel();
-    }
-
-    /* ── TOUCH (iOS / Android) ──
-       passive:false obligatoire → e.preventDefault() fonctionne
-       touch-action:none CSS → le browser ne tente pas de scroller
-       Les events touch suivent automatiquement le doigt même hors de l'élément */
-    function onTStart(e: TouchEvent) {
-      if (e.touches.length !== 1) return;
-      e.preventDefault(); // bloque scroll + long-press callout iOS
-      const t = e.touches[0];
-      begin(t.clientX, t.clientY);
-    }
-    function onTMove(e: TouchEvent) {
-      if (!state.current.active || e.touches.length !== 1) return;
-      e.preventDefault(); // empêche iOS de reclasser ce touch comme scroll
-      const t = e.touches[0];
-      move(t.clientX, t.clientY);
-    }
-    function onTEnd(e: TouchEvent) {
-      const t = e.changedTouches[0];
-      end(t.clientX, t.clientY);
-    }
-    function onTCancel() { cancel(); }
-
-    /* ── MOUSE (desktop) ──
-       mousemove/mouseup sur window → le curseur peut sortir de l'élément */
-    function onMMove(e: MouseEvent) { move(e.clientX, e.clientY); }
-    function onMUp(e: MouseEvent) {
-      window.removeEventListener("mousemove", onMMove);
-      window.removeEventListener("mouseup",   onMUp);
-      end(e.clientX, e.clientY);
-    }
-    function onMDown(e: MouseEvent) {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      begin(e.clientX, e.clientY);
-      window.addEventListener("mousemove", onMMove);
-      window.addEventListener("mouseup",   onMUp);
-    }
-
-    node.addEventListener("touchstart",  onTStart,  { passive: false });
-    node.addEventListener("touchmove",   onTMove,   { passive: false });
-    node.addEventListener("touchend",    onTEnd);
-    node.addEventListener("touchcancel", onTCancel);
-    node.addEventListener("mousedown",   onMDown);
-
-    return () => {
-      node.removeEventListener("touchstart",  onTStart);
-      node.removeEventListener("touchmove",   onTMove);
-      node.removeEventListener("touchend",    onTEnd);
-      node.removeEventListener("touchcancel", onTCancel);
-      node.removeEventListener("mousedown",   onMDown);
-      window.removeEventListener("mousemove", onMMove);
-      window.removeEventListener("mouseup",   onMUp);
-    };
-  }, [cbs]);
+  useDragTouch(ref, {
+    onDragStart: ()       => cbs.current.onStart(data),
+    onDragOver:  (target) => cbs.current.onOver(target),
+    onDrop:      (target) => cbs.current.onDrop(target, data),
+    onTap:       onTap,
+    onCancel:    ()       => cbs.current.onCancel(),
+  });
 
   return (
     <div
       ref={ref}
       style={{
-        touchAction:          "none",   // CSS dit au browser: ne gère pas les gestes
-        userSelect:           "none",
-        WebkitUserSelect:     "none",
-        WebkitTouchCallout:   "none",   // désactive le menu long-press iOS
+        touchAction:        "none",
+        userSelect:         "none",
+        WebkitUserSelect:   "none",
+        WebkitTouchCallout: "none",
       } as React.CSSProperties}
-      className={cn("cursor-grab active:cursor-grabbing select-none", dragging && "opacity-40", className)}
+      className={cn("cursor-grab active:cursor-grabbing select-none", className)}
     >
       {children}
     </div>
@@ -262,61 +176,15 @@ export default function CalendrierPage() {
   function saveWeeklyLimit(v: number) { setWeeklyLimit(v); localStorage.setItem("planpermis_weekly_limit",String(v)); }
 
   /* ── Drag state ── */
-  const dragSrcRef = useRef<DragData|null>(null);
   const [dropTarget, setDropTarget] = useState<string|null>(null);
-  const [ghost, setGhost] = useState<{data: DragData; x: number; y: number}|null>(null);
 
-  function findSlot(x: number, y: number, self: HTMLElement) {
-    self.style.visibility = "hidden";
-    const el = document.elementFromPoint(x, y);
-    self.style.visibility = "";
-    return (el as HTMLElement|null)?.closest("[data-slot]") as HTMLElement|null;
-  }
-
-  function commitDrop(dateStr: string, time: string) {
-    const src = dragSrcRef.current;
-    dragSrcRef.current = null; setDropTarget(null); setGhost(null);
-    if (!src) return;
-    if (src.kind==="student") {
-      setPForm({studentId:src.student.id, date:dateStr, time, instructor:"", examCenter:"", notes:""});
-      setQueueStu(null); setFormError(""); setModal("add");
-    } else {
-      const p = src.placement;
-      if (p.date.slice(0,10)!==dateStr || p.time!==time) {
-        fetch(`/api/placements/${p.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({date:dateStr,time})})
-          .then(()=>fetchData()).catch(()=>{});
-      }
-    }
-  }
-
-  /* Stable callbacks ref passed to every Draggable — no re-render needed */
+  /* Stable callbacks ref — updated each render to keep closures fresh */
   const dragCbs = useRef<DragCbs>({
-    onDragStart: (d) => { dragSrcRef.current = d; },
-    onHover: (x, y, self) => {
-      if (dragSrcRef.current) setGhost({data:dragSrcRef.current, x, y});
-      const slot = findSlot(x, y, self);
-      setDropTarget(slot ? `${slot.dataset.date}:${slot.dataset.time}` : null);
-    },
-    onDrop: (x, y, self) => {
-      const slot = findSlot(x, y, self);
-      if (slot?.dataset.date && slot?.dataset.time) commitDrop(slot.dataset.date, slot.dataset.time);
-      else { dragSrcRef.current=null; setDropTarget(null); setGhost(null); }
-    },
-    onCancel: () => { dragSrcRef.current=null; setDropTarget(null); setGhost(null); },
+    onStart:  () => {},
+    onOver:   () => {},
+    onDrop:   () => {},
+    onCancel: () => {},
   });
-  /* Keep functions fresh each render (closures over latest state) */
-  dragCbs.current.onDragStart = (d) => { dragSrcRef.current = d; };
-  dragCbs.current.onHover = (x, y, self) => {
-    if (dragSrcRef.current) setGhost({data:dragSrcRef.current, x, y});
-    const slot = findSlot(x, y, self);
-    setDropTarget(slot ? `${slot.dataset.date}:${slot.dataset.time}` : null);
-  };
-  dragCbs.current.onDrop = (x, y, self) => {
-    const slot = findSlot(x, y, self);
-    if (slot?.dataset.date && slot?.dataset.time) commitDrop(slot.dataset.date, slot.dataset.time);
-    else { dragSrcRef.current=null; setDropTarget(null); setGhost(null); }
-  };
-  dragCbs.current.onCancel = () => { dragSrcRef.current=null; setDropTarget(null); setGhost(null); };
 
   /* Modals */
   type ModalKind = "add"|"detail"|"queue"|"newStudent"|null;
@@ -355,6 +223,25 @@ export default function CalendrierPage() {
     const res=await fetch("/api/places-examen",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({year:ay,month:am,totalSlots:v})});
     if(res.ok) setMonthData(await res.json());
   }
+
+  /* ── Drag callbacks (updated each render) ── */
+  dragCbs.current.onStart  = () => {};
+  dragCbs.current.onOver   = (t) => { setDropTarget(t ? `${t.date}:${t.time}` : null); };
+  dragCbs.current.onDrop   = (t, d) => {
+    setDropTarget(null);
+    if (!t) return;
+    if (d.kind === "student") {
+      setPForm({studentId:d.student.id, date:t.date, time:t.time, instructor:"", examCenter:"", notes:""});
+      setQueueStu(null); setFormError(""); setModal("add");
+    } else {
+      const p = d.placement;
+      if (p.date.slice(0,10) !== t.date || p.time !== t.time) {
+        fetch(`/api/placements/${p.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({date:t.date,time:t.time})})
+          .then(()=>fetchData()).catch(()=>{});
+      }
+    }
+  };
+  dragCbs.current.onCancel = () => { setDropTarget(null); };
 
   function prev(){if(view==="week"){setWStart(s=>shiftWeek(s,-1));return;}if(curMonth===1){setCurMonth(12);setCurYear(y=>y-1);}else setCurMonth(m=>m-1);}
   function next(){if(view==="week"){setWStart(s=>shiftWeek(s,1));return;}if(curMonth===12){setCurMonth(1);setCurYear(y=>y+1);}else setCurMonth(m=>m+1);}
@@ -539,21 +426,6 @@ export default function CalendrierPage() {
           </div>
         )}
       </div>
-
-      {/* Drag ghost — follows pointer/finger */}
-      {ghost&&(
-        <div className="fixed pointer-events-none z-[9999] -translate-x-1/2 -translate-y-full -mt-2 rotate-2 opacity-90 transition-none"
-          style={{left:ghost.x, top:ghost.y}}>
-          {ghost.data.kind==="student"?(
-            <div className="bg-white rounded-xl shadow-2xl border border-blue-200 p-2 w-36 flex items-center gap-1.5">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-600 text-[10px] font-bold flex-shrink-0">{initials(ghost.data.student)}</div>
-              <span className="text-[11px] font-semibold text-gray-900 truncate">{fullName(ghost.data.student)}</span>
-            </div>
-          ):(
-            <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white text-[10px] font-semibold rounded-lg px-2 py-1.5 shadow-2xl">{fullName(ghost.data.placement.student)}</div>
-          )}
-        </div>
-      )}
 
       {/* ══ Modals ══ */}
       <Modal open={modal==="add"} onClose={closeModal} title={queueStu?`Placer ${fullName(queueStu)}`:"Placer un élève"}>
