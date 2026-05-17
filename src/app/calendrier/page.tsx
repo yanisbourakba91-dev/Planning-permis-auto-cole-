@@ -9,8 +9,7 @@ import {
   useDroppable,
   useSensor,
   useSensors,
-  MouseSensor,
-  TouchSensor,
+  PointerSensor,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
@@ -59,7 +58,7 @@ const DAYS_SHORT = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
 const MONTH_NAMES = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
 
 /* ─────────── Helpers ─────────── */
-function weekStart(d: Date): Date {
+function weekStartOf(d: Date): Date {
   const r = new Date(d);
   const day = r.getDay();
   r.setDate(r.getDate() - (day === 0 ? 6 : day - 1));
@@ -72,25 +71,25 @@ function weekDays(start: Date): Date[] {
   });
 }
 function dateKey(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 function shiftWeek(d: Date, n: number): Date {
   const r = new Date(d); r.setDate(r.getDate() + n * 7); return r;
 }
-function fmt2(n: number): string { return String(n).padStart(2,"0"); }
+function fmt2(n: number) { return String(n).padStart(2,"0"); }
 function drivingDate(s: string | null): string {
   if (!s) return "—";
   const d = new Date(s);
-  return `${fmt2(d.getDate())}/${fmt2(d.getMonth() + 1)}`;
+  return `${fmt2(d.getDate())}/${fmt2(d.getMonth()+1)}`;
 }
-function getDaysInMonth(y: number, m: number): number { return new Date(y, m, 0).getDate(); }
-function getFirstOffset(y: number, m: number): number {
-  const d = new Date(y, m - 1, 1).getDay(); return d === 0 ? 6 : d - 1;
+function getDaysInMonth(y: number, m: number) { return new Date(y, m, 0).getDate(); }
+function getFirstOffset(y: number, m: number) {
+  const d = new Date(y, m-1, 1).getDay(); return d === 0 ? 6 : d-1;
 }
-function initials(s: Student): string {
+function initials(s: Student) {
   return ((s.firstName?.[0] ?? "") + (s.lastName?.[0] ?? "")).toUpperCase() || "?";
 }
-function fullName(s: { firstName: string; lastName: string }): string {
+function fullName(s: { firstName: string; lastName: string }) {
   return s.firstName ? `${s.firstName} ${s.lastName}` : s.lastName;
 }
 function weekLabel(days: Date[]): string {
@@ -101,51 +100,98 @@ function weekLabel(days: Date[]): string {
 }
 
 /* ─────────────────────────────────────────────
-   DnD COMPONENTS  (only these three use dnd-kit)
+   DND COMPONENTS
+   Key design: drag handle is SEPARATE from click area
+   so browser's post-drag "click" event doesn't open modals.
 ───────────────────────────────────────────── */
 
-/** Card in the waiting queue — can be dragged to any time slot */
-function QueueCard({ student, onClickCard }: { student: Student; onClickCard: () => void }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: `student-${student.id}`,
-    data: { kind: "student", student } satisfies DragData,
-  });
+/**
+ * Queue card.
+ * - Avatar = drag handle (gets dnd-kit listeners, no onClick)
+ * - Text = click area (opens placement modal, no drag listeners)
+ * This completely prevents the browser's post-drag click from triggering the modal.
+ */
+function QueueCard({
+  student,
+  onClickCard,
+}: {
+  student: Student;
+  onClickCard: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({
+      id: `student-${student.id}`,
+      data: { kind: "student", student } satisfies DragData,
+    });
+
   return (
     <div
       ref={setNodeRef}
       style={transform ? { transform: CSS.Translate.toString(transform) } : undefined}
-      {...listeners}
-      {...attributes}
       className={cn(
-        "glass rounded-xl p-2 select-none cursor-grab active:cursor-grabbing",
-        "hover:shadow-md hover:border-blue-200 transition-all duration-150",
+        "bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700",
+        "flex items-center gap-2 px-2 py-1.5 select-none",
         isDragging && "opacity-40"
       )}
-      onClick={onClickCard}
     >
-      <div className="flex items-center gap-1.5">
-        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-600 text-[10px] font-bold flex-shrink-0">
-          {initials(student)}
-        </div>
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold text-gray-900 dark:text-gray-100 truncate">{fullName(student)}</p>
-          <p className="text-[9px] text-gray-400 truncate">{student.drivingHours}h · {drivingDate(student.lastDrivingDate)}</p>
-        </div>
+      {/* ── DRAG HANDLE: avatar circle ── */}
+      <div
+        {...listeners}
+        {...attributes}
+        style={{ touchAction: "none" }}
+        title="Glisser vers un créneau"
+        className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 text-[10px] font-bold flex-shrink-0 cursor-grab active:cursor-grabbing"
+      >
+        {initials(student)}
       </div>
+
+      {/* ── CLICK AREA: student info ── */}
+      <button
+        type="button"
+        onClick={onClickCard}
+        className="min-w-0 flex-1 text-left leading-tight"
+      >
+        <p className="text-[11px] font-semibold text-gray-900 dark:text-gray-100 truncate">
+          {fullName(student)}
+        </p>
+        <p className="text-[9px] text-gray-400 truncate">
+          {student.drivingHours}h · {drivingDate(student.lastDrivingDate)}
+        </p>
+      </button>
     </div>
   );
 }
 
-/** Placement chip inside the calendar — can be dragged to another slot */
-function PlacementChip({ placement, onClickChip }: { placement: Placement; onClickChip: (e: React.MouseEvent) => void }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: `placement-${placement.id}`,
-    data: { kind: "placement", placement } satisfies DragData,
-  });
+/**
+ * Existing placement chip inside a time slot.
+ * - Whole chip is the drag handle.
+ * - Uses dragJustEndedRef to suppress the post-drag click.
+ */
+function PlacementChip({
+  placement,
+  dragJustEndedRef,
+  onClickChip,
+}: {
+  placement: Placement;
+  dragJustEndedRef: React.RefObject<boolean>;
+  onClickChip: (e: React.MouseEvent) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({
+      id: `placement-${placement.id}`,
+      data: { kind: "placement", placement } satisfies DragData,
+    });
+
+  function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (dragJustEndedRef.current) return; // suppress click after drag
+    onClickChip(e);
+  }
+
   return (
     <div
       ref={setNodeRef}
-      style={transform ? { transform: CSS.Translate.toString(transform) } : undefined}
+      style={{ touchAction: "none", ...(transform ? { transform: CSS.Translate.toString(transform) } : {}) }}
       {...listeners}
       {...attributes}
       className={cn(
@@ -154,32 +200,43 @@ function PlacementChip({ placement, onClickChip }: { placement: Placement; onCli
         "cursor-grab active:cursor-grabbing",
         isDragging && "opacity-30"
       )}
-      onClick={onClickChip}
+      onClick={handleClick}
     >
       <span className="truncate">{fullName(placement.student)}</span>
     </div>
   );
 }
 
-/** One time-slot cell — accepts drops from QueueCard and PlacementChip */
+/**
+ * Time slot — drop target.
+ * Highlights blue when a draggable hovers over it.
+ */
 function TimeSlot({
-  slotId, dateStr, time, children, onClickSlot,
+  slotId,
+  dateStr,
+  time,
+  children,
+  onClickSlot,
 }: {
-  slotId: string; dateStr: string; time: string;
-  children: React.ReactNode; onClickSlot: () => void;
+  slotId: string;
+  dateStr: string;
+  time: string;
+  children: React.ReactNode;
+  onClickSlot: () => void;
 }) {
   const { isOver, setNodeRef } = useDroppable({
     id: slotId,
     data: { dateStr, time },
   });
+
   return (
     <div
       ref={setNodeRef}
       className={cn(
-        "h-14 border-t border-gray-100 dark:border-gray-800/60 relative cursor-pointer transition-colors",
+        "h-14 border-t border-gray-100 dark:border-gray-800/60 relative cursor-pointer transition-colors duration-75",
         isOver
           ? "bg-blue-100 dark:bg-blue-900/30 ring-2 ring-inset ring-blue-500"
-          : "hover:bg-gray-50/60 dark:hover:bg-gray-800/30"
+          : "hover:bg-gray-50/80 dark:hover:bg-gray-800/30"
       )}
       onClick={onClickSlot}
     >
@@ -188,19 +245,20 @@ function TimeSlot({
   );
 }
 
-/* ─────────────────────────────────────────────
-   Editable counter chip
-───────────────────────────────────────────── */
-function EditableCounter({ label, value, sub, color, onSave }: {
+/* ─────────── Editable counter ─────────── */
+function EditableCounter({
+  label, value, sub, color, onSave,
+}: {
   label: string; value: number | null; sub?: string;
   color: "blue" | "green"; onSave?: (v: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [input, setInput] = useState("");
   const ref = useRef<HTMLInputElement>(null);
-  const cls = color === "blue"
-    ? "bg-blue-50/80 border border-blue-100 text-blue-600"
-    : "bg-green-50/80 border border-green-100 text-green-600";
+  const cls =
+    color === "blue"
+      ? "bg-blue-50 border border-blue-100 text-blue-600"
+      : "bg-green-50 border border-green-100 text-green-600";
 
   function start() {
     if (!onSave) return;
@@ -213,6 +271,7 @@ function EditableCounter({ label, value, sub, color, onSave }: {
     if (!isNaN(n) && n >= 0 && onSave) onSave(n);
     setEditing(false);
   }
+
   return (
     <div
       className={cn("flex flex-col items-center px-5 py-3 rounded-2xl min-w-[150px] shadow-sm", cls, onSave && "cursor-pointer")}
@@ -221,11 +280,7 @@ function EditableCounter({ label, value, sub, color, onSave }: {
       <span className="text-[10px] font-semibold uppercase tracking-wider opacity-60 mb-1 text-center leading-tight">{label}</span>
       {editing ? (
         <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-          <input
-            ref={ref}
-            type="number"
-            min={0}
-            value={input}
+          <input ref={ref} type="number" min={0} value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
             className="w-16 text-center text-2xl font-bold bg-transparent border-b-2 border-current focus:outline-none"
@@ -244,16 +299,16 @@ function EditableCounter({ label, value, sub, color, onSave }: {
   );
 }
 
-/* ─────────────────────────────────────────────
+/* ═══════════════════════════════════════
    MAIN PAGE
-───────────────────────────────────────────── */
+═══════════════════════════════════════ */
 export default function CalendrierPage() {
   const { data: session } = useSession();
   const now = new Date();
   const todayKey = dateKey(now);
 
   const [view, setView] = useState<"week" | "month">("week");
-  const [wStart, setWStart] = useState(() => weekStart(now));
+  const [wStart, setWStart] = useState(() => weekStartOf(now));
   const [curYear, setCurYear] = useState(now.getFullYear());
   const [curMonth, setCurMonth] = useState(now.getMonth() + 1);
 
@@ -272,13 +327,14 @@ export default function CalendrierPage() {
     localStorage.setItem("planpermis_weekly_limit", String(v));
   }
 
-  /* ── Sensors: MouseSensor + TouchSensor only ── */
+  /* Single PointerSensor — handles mouse + touch */
   const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
 
-  /* active drag data for DragOverlay */
+  /* Track if a drag just ended so PlacementChip can suppress the post-drag click */
+  const dragJustEndedRef = useRef(false);
+
   const [activeDrag, setActiveDrag] = useState<DragData | null>(null);
 
   /* Modals */
@@ -296,22 +352,26 @@ export default function CalendrierPage() {
     setLoading(true);
     try {
       const days = weekDays(wStart);
-      const uniqMonths = [...new Map(days.map(d => [
-        `${d.getFullYear()}-${d.getMonth()+1}`,
-        { year: d.getFullYear(), month: d.getMonth()+1 }
-      ])).values()];
+      const uniqMonths = [
+        ...new Map(days.map(d => [
+          `${d.getFullYear()}-${d.getMonth()+1}`,
+          { year: d.getFullYear(), month: d.getMonth()+1 },
+        ])).values(),
+      ];
       const activeYear = view === "week" ? wStart.getFullYear() : curYear;
       const activeMonth = view === "week" ? wStart.getMonth()+1 : curMonth;
       const placeFetches = view === "week"
-        ? uniqMonths.map(({ year, month }) => fetch(`/api/placements?year=${year}&month=${month}`).then(r => r.json()))
+        ? uniqMonths.map(({ year, month }) =>
+            fetch(`/api/placements?year=${year}&month=${month}`).then(r => r.json()))
         : [fetch(`/api/placements?year=${curYear}&month=${curMonth}`).then(r => r.json())];
+
       const [stuData, allMonths, ...pArrays] = await Promise.all([
         fetch("/api/eleves").then(r => r.json()),
         fetch(`/api/places-examen?year=${activeYear}`).then(r => r.json()),
         ...placeFetches,
       ]);
-      const all = (pArrays.flat() as unknown[]).filter((p): p is Placement =>
-        !!p && typeof p === "object" && "id" in (p as object)
+      const all = (pArrays.flat() as unknown[]).filter(
+        (p): p is Placement => !!p && typeof p === "object" && "id" in (p as object)
       );
       setPlacements(all);
       setStudents(Array.isArray(stuData) ? stuData : []);
@@ -322,6 +382,7 @@ export default function CalendrierPage() {
     } catch { /* silent */ }
     finally { setLoading(false); }
   }, [wStart, curYear, curMonth, view]);
+
   useEffect(() => { fetchData(); }, [fetchData]);
 
   async function saveMonthlyTotal(v: number) {
@@ -338,16 +399,16 @@ export default function CalendrierPage() {
   /* ── Navigation ── */
   function prev() {
     if (view === "week") { setWStart(s => shiftWeek(s, -1)); return; }
-    if (curMonth === 1) { setCurMonth(12); setCurYear(y => y - 1); }
-    else setCurMonth(m => m - 1);
+    if (curMonth === 1) { setCurMonth(12); setCurYear(y => y-1); }
+    else setCurMonth(m => m-1);
   }
   function next() {
     if (view === "week") { setWStart(s => shiftWeek(s, 1)); return; }
-    if (curMonth === 12) { setCurMonth(1); setCurYear(y => y + 1); }
-    else setCurMonth(m => m + 1);
+    if (curMonth === 12) { setCurMonth(1); setCurYear(y => y+1); }
+    else setCurMonth(m => m+1);
   }
   function goToday() {
-    setWStart(weekStart(now));
+    setWStart(weekStartOf(now));
     setCurYear(now.getFullYear());
     setCurMonth(now.getMonth()+1);
   }
@@ -359,28 +420,41 @@ export default function CalendrierPage() {
 
   function handleDragEnd({ active, over }: DragEndEvent) {
     setActiveDrag(null);
+
+    /* Mark drag-just-ended so PlacementChip suppresses the upcoming click */
+    dragJustEndedRef.current = true;
+    setTimeout(() => { dragJustEndedRef.current = false; }, 200);
+
     if (!over) return;
 
     const src = active.data.current as DragData | undefined;
     const dst = over.data.current as { dateStr: string; time: string } | undefined;
-
     if (!src || !dst?.dateStr || !dst?.time) return;
 
     if (src.kind === "student") {
-      /* Case 1 — drop queue student onto a slot → open placement modal */
-      setPForm({ studentId: src.student.id, date: dst.dateStr, time: dst.time, instructor: "", examCenter: "", notes: "" });
+      /* Drop queue student onto a slot → pre-fill placement modal */
+      setPForm({
+        studentId: src.student.id,
+        date: dst.dateStr,
+        time: dst.time,
+        instructor: "",
+        examCenter: "",
+        notes: "",
+      });
       setQueueStu(null);
       setFormError("");
       setModal("add");
     } else if (src.kind === "placement") {
-      /* Case 2 — move existing placement to another slot */
+      /* Move existing placement to another slot */
       const p = src.placement;
       if (p.date.slice(0, 10) !== dst.dateStr || p.time !== dst.time) {
         fetch(`/api/placements/${p.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ date: dst.dateStr, time: dst.time }),
-        }).then(() => fetchData()).catch(() => { /* silent */ });
+        })
+          .then(() => fetchData())
+          .catch(() => { /* silent */ });
       }
     }
   }
@@ -389,12 +463,14 @@ export default function CalendrierPage() {
   function openFromSlot(d: string, t: string) {
     setQueueStu(null);
     setPForm({ studentId: "", date: d, time: t, instructor: "", examCenter: "", notes: "" });
-    setFormError(""); setModal("add");
+    setFormError("");
+    setModal("add");
   }
   function openFromQueue(s: Student) {
     setQueueStu(s);
     setPForm({ studentId: s.id, date: "", time: "09:00", instructor: "", examCenter: "", notes: "" });
-    setFormError(""); setModal("add");
+    setFormError("");
+    setModal("add");
   }
   function openDetail(p: Placement) { setSelPlacement(p); setModal("detail"); }
   function closeModal() { setModal(null); setSelPlacement(null); setQueueStu(null); setFormError(""); }
@@ -425,7 +501,12 @@ export default function CalendrierPage() {
       const res = await fetch("/api/eleves", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...sForm, drivingHours: parseFloat(sForm.drivingHours) || 0, lastDrivingDate: sForm.lastDrivingDate || null, email: sForm.email || undefined }),
+        body: JSON.stringify({
+          ...sForm,
+          drivingHours: parseFloat(sForm.drivingHours) || 0,
+          lastDrivingDate: sForm.lastDrivingDate || null,
+          email: sForm.email || undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) { setFormError(data.error || "Erreur"); return; }
@@ -443,33 +524,30 @@ export default function CalendrierPage() {
     finally { setFormLoading(false); }
   }
 
-  /* ── Derived data ── */
+  /* ── Derived ── */
   const days = weekDays(wStart);
   const wKeys = new Set(days.map(dateKey));
-  const weekCount = placements.filter(p => wKeys.has(p.date.slice(0, 10))).length;
+  const weekCount = placements.filter(p => wKeys.has(p.date.slice(0,10))).length;
   const monthAvailable = monthData ? Math.max(0, monthData.totalSlots - monthData.usedSlots) : null;
   const bySlot = new Map<string, Placement[]>();
   placements.forEach(p => {
-    const k = `${p.date.slice(0, 10)}:${p.time}`;
+    const k = `${p.date.slice(0,10)}:${p.time}`;
     bySlot.set(k, [...(bySlot.get(k) ?? []), p]);
   });
   const studentOptions = students.map(s => ({ value: s.id, label: fullName(s) }));
 
-  /* ─────────────────── RENDER ─────────────────── */
+  /* ═══════════ RENDER ═══════════ */
   return (
     <AppLayout title="Calendrier" role={session?.user?.role || ""} schoolName={session?.user?.schoolName}>
 
-      {/*
-        DndContext wraps ONLY the calendar grid.
-        Modals live outside so they are never disrupted by drag events.
-      */}
+      {/* DndContext wraps ONLY the calendar. Modals are intentionally outside. */}
       <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
 
         <div className="flex flex-col gap-4" style={{ height: "calc(100vh - 57px)" }}>
 
           {/* Toolbar */}
           <div className="flex flex-wrap items-center gap-3 flex-shrink-0">
-            <div className="flex items-center gap-1 glass rounded-xl shadow-sm p-1">
+            <div className="flex items-center gap-1 bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 p-1">
               <button onClick={prev} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors">
                 <ChevronLeft className="h-4 w-4" />
               </button>
@@ -480,10 +558,10 @@ export default function CalendrierPage() {
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
-            <button onClick={goToday} className="px-3 py-1.5 rounded-xl glass text-sm font-medium text-gray-600 hover:bg-white/90 transition-colors shadow-sm">
+            <button onClick={goToday} className="px-3 py-1.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors shadow-sm">
               Aujourd'hui
             </button>
-            <div className="flex rounded-xl glass shadow-sm p-1 ml-auto">
+            <div className="flex rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-sm p-1 ml-auto">
               <button onClick={() => setView("week")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", view === "week" ? "bg-blue-500 text-white shadow-sm" : "text-gray-500 hover:text-gray-700")}>
                 <AlignJustify className="h-3.5 w-3.5" /> Semaine
               </button>
@@ -493,23 +571,15 @@ export default function CalendrierPage() {
             </div>
           </div>
 
-          {/* Counters (week view only) */}
+          {/* Counters */}
           {view === "week" && (
             <div className="flex gap-3 flex-wrap flex-shrink-0">
-              <EditableCounter
-                label="Places restantes ce mois"
-                value={monthAvailable}
-                sub={monthData ? `sur ${monthData.totalSlots} · cliquer pour modifier` : "Cliquer pour définir"}
-                color="blue"
-                onSave={saveMonthlyTotal}
-              />
-              <EditableCounter
-                label="Places disponibles cette semaine"
-                value={Math.max(0, weeklyLimit - weekCount)}
+              <EditableCounter label="Places restantes ce mois" value={monthAvailable}
+                sub={monthData ? `sur ${monthData.totalSlots} · cliquer` : "Cliquer pour définir"}
+                color="blue" onSave={saveMonthlyTotal} />
+              <EditableCounter label="Places cette semaine" value={Math.max(0, weeklyLimit - weekCount)}
                 sub={`${weekCount} planifié${weekCount !== 1 ? "s" : ""} · limite ${weeklyLimit} · cliquer`}
-                color="green"
-                onSave={saveWeeklyLimit}
-              />
+                color="green" onSave={saveWeeklyLimit} />
             </div>
           )}
 
@@ -521,17 +591,17 @@ export default function CalendrierPage() {
 
           ) : view === "week" ? (
 
-            /* ══════ WEEK VIEW ══════ */
-            <div className="flex-1 glass rounded-2xl shadow-sm overflow-hidden flex flex-col min-h-0">
+            /* ══ WEEK VIEW ══ */
+            <div className="flex-1 bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col min-h-0">
 
               {/* Day headers */}
-              <div className="flex border-b-2 border-gray-200/60 dark:border-gray-700 bg-gray-50/40 flex-shrink-0">
-                <div className="w-14 flex-shrink-0 border-r border-gray-200/60 dark:border-gray-700" />
+              <div className="flex border-b-2 border-gray-200 dark:border-gray-700 bg-gray-50/50 flex-shrink-0">
+                <div className="w-14 flex-shrink-0 border-r border-gray-200 dark:border-gray-700" />
                 {days.map((day, di) => {
                   const dk = dateKey(day);
                   const isToday = dk === todayKey;
                   return (
-                    <div key={dk} className={cn("flex-1 min-w-0 flex flex-col items-center py-2.5 border-r border-gray-100/60 dark:border-gray-800 last:border-r-0", isToday && "bg-blue-50/60")}>
+                    <div key={dk} className={cn("flex-1 min-w-0 flex flex-col items-center py-2.5 border-r border-gray-100 dark:border-gray-800 last:border-r-0", isToday && "bg-blue-50/60")}>
                       <span className={cn("text-[10px] font-bold uppercase tracking-widest", isToday ? "text-blue-500" : "text-gray-400")}>
                         {DAYS_SHORT[di]}
                       </span>
@@ -541,8 +611,7 @@ export default function CalendrierPage() {
                     </div>
                   );
                 })}
-                {/* Queue header */}
-                <div className="w-44 flex-shrink-0 border-l-2 border-blue-200/50 bg-blue-50/40 flex items-center justify-between px-3 py-2.5">
+                <div className="w-44 flex-shrink-0 border-l-2 border-blue-100 dark:border-blue-900/50 bg-blue-50/30 flex items-center justify-between px-3 py-2.5">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-blue-500">File d'attente</span>
                   <button
                     onClick={() => { setFormError(""); setModal("queue"); }}
@@ -556,20 +625,20 @@ export default function CalendrierPage() {
               {/* Scrollable body */}
               <div className="flex flex-1 overflow-y-auto min-h-0">
                 {/* Time labels */}
-                <div className="w-14 flex-shrink-0 border-r border-gray-200/60 dark:border-gray-700 bg-gray-50/20">
+                <div className="w-14 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-gray-50/30">
                   {TIME_SLOTS.map(t => (
-                    <div key={t} className="h-14 flex items-start justify-center pt-1.5 border-t border-gray-100/60 dark:border-gray-800">
+                    <div key={t} className="h-14 flex items-start justify-center pt-1.5 border-t border-gray-100 dark:border-gray-800">
                       <span className="text-[10px] font-medium text-gray-400">{t}</span>
                     </div>
                   ))}
                 </div>
 
-                {/* Day columns with droppable slots */}
+                {/* Day columns */}
                 {days.map(day => {
                   const dk = dateKey(day);
                   const isToday = dk === todayKey;
                   return (
-                    <div key={dk} className={cn("flex-1 min-w-0 border-r border-gray-100/60 dark:border-gray-800 last:border-r-0", isToday && "bg-blue-50/15")}>
+                    <div key={dk} className={cn("flex-1 min-w-0 border-r border-gray-100 dark:border-gray-800 last:border-r-0", isToday && "bg-blue-50/20")}>
                       {TIME_SLOTS.map(time => {
                         const slotId = `${dk}:${time}`;
                         const slotPlacements = bySlot.get(slotId) ?? [];
@@ -585,6 +654,7 @@ export default function CalendrierPage() {
                               <PlacementChip
                                 key={p.id}
                                 placement={p}
+                                dragJustEndedRef={dragJustEndedRef}
                                 onClickChip={e => { e.stopPropagation(); openDetail(p); }}
                               />
                             ))}
@@ -595,8 +665,8 @@ export default function CalendrierPage() {
                   );
                 })}
 
-                {/* Queue column (drag sources) */}
-                <div className="w-44 flex-shrink-0 border-l-2 border-blue-200/40 bg-blue-50/15 overflow-y-auto p-2 space-y-1.5">
+                {/* Queue column */}
+                <div className="w-44 flex-shrink-0 border-l-2 border-blue-100 dark:border-blue-900/50 bg-blue-50/20 overflow-y-auto p-2 space-y-1.5">
                   {students.length === 0 ? (
                     <div className="h-24 flex flex-col items-center justify-center text-center gap-1">
                       <p className="text-xs text-gray-400">Aucun élève</p>
@@ -613,16 +683,16 @@ export default function CalendrierPage() {
 
           ) : (
 
-            /* ══════ MONTH VIEW ══════ */
-            <div className="glass rounded-2xl shadow-sm overflow-hidden">
-              <div className="grid grid-cols-7 border-b-2 border-gray-200/60 bg-gray-50/40">
+            /* ══ MONTH VIEW ══ */
+            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <div className="grid grid-cols-7 border-b-2 border-gray-200 dark:border-gray-700 bg-gray-50/50">
                 {DAYS_SHORT.map(d => (
                   <div key={d} className="py-2.5 text-center text-[10px] font-bold uppercase tracking-widest text-gray-400">{d}</div>
                 ))}
               </div>
               <div className="grid grid-cols-7">
                 {Array.from({ length: getFirstOffset(curYear, curMonth) }).map((_, i) => (
-                  <div key={`e-${i}`} className="h-24 border-b border-r border-gray-50/60 bg-gray-50/20" />
+                  <div key={`e-${i}`} className="h-24 border-b border-r border-gray-50 dark:border-gray-800 bg-gray-50/30" />
                 ))}
                 {Array.from({ length: getDaysInMonth(curYear, curMonth) }).map((_, i) => {
                   const day = i + 1;
@@ -630,27 +700,23 @@ export default function CalendrierPage() {
                   const dayPlacements = placements.filter(p => p.date.slice(0,10) === dk);
                   const isToday = dk === todayKey;
                   return (
-                    <div
-                      key={day}
-                      onClick={() => { setView("week"); setWStart(weekStart(new Date(curYear, curMonth-1, day))); }}
-                      className={cn("h-24 border-b border-r border-gray-100/60 p-1.5 cursor-pointer hover:bg-blue-50/40 transition-colors", isToday && "bg-blue-50/50")}
+                    <div key={day}
+                      onClick={() => { setView("week"); setWStart(weekStartOf(new Date(curYear, curMonth-1, day))); }}
+                      className={cn("h-24 border-b border-r border-gray-100 dark:border-gray-800 p-1.5 cursor-pointer hover:bg-blue-50/30 transition-colors", isToday && "bg-blue-50/40")}
                     >
                       <span className={cn("inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold", isToday ? "bg-blue-500 text-white" : "text-gray-700 dark:text-gray-300")}>
                         {day}
                       </span>
                       <div className="mt-0.5 space-y-0.5">
                         {dayPlacements.slice(0, 2).map(p => (
-                          <div
-                            key={p.id}
+                          <div key={p.id}
                             onClick={e => { e.stopPropagation(); openDetail(p); }}
                             className="text-[9px] font-semibold text-white bg-blue-500 rounded px-1 py-0.5 truncate"
                           >
                             {p.time} {p.student.lastName}
                           </div>
                         ))}
-                        {dayPlacements.length > 2 && (
-                          <div className="text-[9px] text-gray-400">+{dayPlacements.length - 2}</div>
-                        )}
+                        {dayPlacements.length > 2 && <div className="text-[9px] text-gray-400">+{dayPlacements.length - 2}</div>}
                       </div>
                     </div>
                   );
@@ -660,15 +726,17 @@ export default function CalendrierPage() {
           )}
         </div>
 
-        {/* Drag overlay — renders at document root, always visible */}
+        {/* Drag ghost — z-index 999 by default in dnd-kit */}
         <DragOverlay dropAnimation={null}>
           {activeDrag?.kind === "student" && (
-            <div className="glass rounded-xl shadow-2xl p-2 w-40 rotate-2 opacity-95 pointer-events-none border-blue-200">
+            <div className="bg-white rounded-xl shadow-2xl border border-blue-200 p-2 w-40 rotate-2 opacity-95 pointer-events-none">
               <div className="flex items-center gap-1.5">
                 <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-600 text-[10px] font-bold">
                   {initials(activeDrag.student)}
                 </div>
-                <span className="text-[11px] font-semibold text-gray-900 truncate">{fullName(activeDrag.student)}</span>
+                <span className="text-[11px] font-semibold text-gray-900 truncate">
+                  {fullName(activeDrag.student)}
+                </span>
               </div>
             </div>
           )}
@@ -681,7 +749,7 @@ export default function CalendrierPage() {
 
       </DndContext>
 
-      {/* ── Modals (outside DndContext intentionally) ── */}
+      {/* ══ Modals (outside DndContext — intentional) ══ */}
 
       <Modal open={modal === "add"} onClose={closeModal} title={queueStu ? `Placer ${fullName(queueStu)}` : "Placer un élève"}>
         <form onSubmit={submitPlacement} className="space-y-4 mt-2">
@@ -730,11 +798,8 @@ export default function CalendrierPage() {
               ))}
               {selPlacement.notes && <div className="pt-2 border-t border-gray-200 dark:border-gray-700 text-sm text-gray-500">{selPlacement.notes}</div>}
             </div>
-            <button
-              onClick={() => deletePlacement(selPlacement.id)}
-              disabled={formLoading}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 disabled:opacity-50 transition-colors"
-            >
+            <button onClick={() => deletePlacement(selPlacement.id)} disabled={formLoading}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 disabled:opacity-50 transition-colors">
               <Trash2 className="h-4 w-4" />
               {formLoading ? "Suppression..." : "Supprimer ce placement"}
             </button>
@@ -744,10 +809,8 @@ export default function CalendrierPage() {
 
       <Modal open={modal === "queue"} onClose={closeModal} title="Ajouter à la file d'attente">
         <div className="mt-3 space-y-3">
-          <button
-            onClick={() => setModal("newStudent")}
-            className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-dashed border-blue-200 hover:border-blue-400 hover:bg-blue-50 transition-colors text-left"
-          >
+          <button onClick={() => setModal("newStudent")}
+            className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-dashed border-blue-200 hover:border-blue-400 hover:bg-blue-50 transition-colors text-left">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-500">
               <Plus className="h-5 w-5" />
             </div>
@@ -760,11 +823,8 @@ export default function CalendrierPage() {
             <div className="space-y-1 max-h-64 overflow-y-auto">
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1 mb-2">Élèves existants</p>
               {students.map(s => (
-                <button
-                  key={s.id}
-                  onClick={() => openFromQueue(s)}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left"
-                >
+                <button key={s.id} onClick={() => openFromQueue(s)}
+                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left">
                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-50 text-blue-500 text-xs font-bold flex-shrink-0">{initials(s)}</div>
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{fullName(s)}</p>
