@@ -29,6 +29,13 @@ interface Options {
 const LONG_PRESS_MS  = 220;  // ms avant activation du drag
 const SCROLL_CANCEL  = 10;   // px de mouvement qui annule le long-press
 
+function dbg(msg: string) {
+  try {
+    const fn = (window as unknown as Record<string, unknown>).__dragLog;
+    if (typeof fn === "function") (fn as (m: string) => void)(msg);
+  } catch { /* ignore */ }
+}
+
 export function useDragTouch(
   ref: RefObject<HTMLElement | null>,
   options: Options
@@ -125,6 +132,7 @@ export function useDragTouch(
         const dx = Math.abs(t.clientX - startX);
         const dy = Math.abs(t.clientY - startY);
         if (dx > SCROLL_CANCEL || dy > SCROLL_CANCEL) {
+          dbg(`SCROLL_CANCEL dx=${dx.toFixed(0)} dy=${dy.toFixed(0)}`);
           // Mouvement trop grand → c'est un scroll, on annule le drag
           if (timer) { clearTimeout(timer); timer = null; }
           cancelled = true;
@@ -137,7 +145,9 @@ export function useDragTouch(
       // Drag actif → MAINTENANT on peut appeler preventDefault sans risque
       e.preventDefault();
       moveClone(t.clientX, t.clientY);
-      opts.current.onDragOver?.(findSlot(t.clientX, t.clientY));
+      const slot = findSlot(t.clientX, t.clientY);
+      dbg(`drag_move x=${t.clientX.toFixed(0)} y=${t.clientY.toFixed(0)} slot=${slot?`${slot.date}@${slot.time}`:"none"}`);
+      opts.current.onDragOver?.(slot);
     }
 
     function onDocEnd(e: TouchEvent) {
@@ -148,17 +158,22 @@ export function useDragTouch(
       if (wasDrag && clone) {
         const t    = e.changedTouches[0];
         const slot = findSlot(t.clientX, t.clientY);
+        dbg(`DROP slot=${slot?`${slot.date}@${slot.time}`:"null"}`);
         removeClone();
         opts.current.onDragOver?.(null);
         opts.current.onDrop(slot);
       } else if (!wasDrag && !wasCancelled) {
+        dbg("TAP");
         // Relâché rapidement → tap
         opts.current.onTap();
+      } else {
+        dbg(`end wasDrag=${wasDrag} wasCancelled=${wasCancelled} clone=${!!clone}`);
       }
       // Si wasCancelled → scroll iOS, on ne fait rien
     }
 
     function onDocCancel() {
+      dbg("touchcancel");
       detach();
       if (clone) { removeClone(); opts.current.onDragOver?.(null); opts.current.onCancel?.(); }
     }
@@ -176,10 +191,13 @@ export function useDragTouch(
       dragActive  = false;
       cancelled   = false;
 
+      dbg(`touchstart x=${t.clientX.toFixed(0)} y=${t.clientY.toFixed(0)}`);
+
       // Démarrer le timer du long-press
       timer = setTimeout(() => {
         timer      = null;
         dragActive = true;
+        dbg(`LONG_PRESS_FIRED → dragActive=true`);
         createClone(startX, startY);
         opts.current.onDragStart?.();
       }, LONG_PRESS_MS);

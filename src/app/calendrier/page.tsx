@@ -155,6 +155,44 @@ function EditableCounter({ label, value, sub, color, onSave }: {
   );
 }
 
+/* ─────────── Debug panel (iPad sans DevTools) ─────────── */
+function DebugPanel() {
+  const [logs, setLogs] = useState<string[]>([]);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    (window as unknown as Record<string, unknown>).__dragLog = (msg: string) => {
+      setLogs(prev => [`${new Date().toISOString().slice(11,23)} ${msg}`, ...prev].slice(0, 20));
+    };
+  }, []);
+
+  if (!visible) return (
+    <button
+      onClick={() => setVisible(true)}
+      className="fixed bottom-4 right-4 z-[99999] bg-black text-white text-xs px-3 py-2 rounded-full opacity-70"
+    >
+      DEBUG
+    </button>
+  );
+
+  return (
+    <div className="fixed bottom-0 left-0 right-0 z-[99999] bg-black/90 text-green-400 text-[10px] font-mono p-2 max-h-48 overflow-y-auto">
+      <div className="flex justify-between items-center mb-1">
+        <span className="text-white font-bold">DRAG DEBUG</span>
+        <button onClick={() => setLogs([])} className="text-yellow-400 mr-2">CLEAR</button>
+        <button onClick={() => setVisible(false)} className="text-red-400">FERMER</button>
+      </div>
+      {logs.length === 0 && <p className="text-gray-500">En attente d'events touch...</p>}
+      {logs.map((l, i) => <div key={i}>{l}</div>)}
+    </div>
+  );
+}
+
+function dragLog(msg: string) {
+  const fn = (window as unknown as Record<string, unknown>).__dragLog;
+  if (typeof fn === "function") (fn as (m: string) => void)(msg);
+}
+
 /* ═══════════════════════════════════════ MAIN PAGE ═══════════════════════════════════════ */
 export default function CalendrierPage() {
   const { data: session } = useSession();
@@ -514,6 +552,7 @@ export default function CalendrierPage() {
         </form>
       </Modal>
 
+      <DebugPanel />
     </AppLayout>
   );
 }
