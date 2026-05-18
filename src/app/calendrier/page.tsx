@@ -362,83 +362,88 @@ export default function CalendrierPage() {
           </div>
         ):view==="week"?(
 
-          <div className="flex-1 bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col min-h-0">
-            {/* Day headers */}
-            <div className="flex border-b-2 border-gray-200 dark:border-gray-700 bg-gray-50/50 flex-shrink-0">
-              <div className="w-14 flex-shrink-0 border-r border-gray-200 dark:border-gray-700"/>
-              {days.map((day,di)=>{
-                const dk=dateKey(day),isToday=dk===todayKey;
-                return(
-                  <div key={dk} className={cn("flex-1 min-w-0 flex flex-col items-center py-2.5 border-r border-gray-100 dark:border-gray-800 last:border-r-0",isToday&&"bg-blue-50/60")}>
-                    <span className={cn("text-[10px] font-bold uppercase tracking-widest",isToday?"text-blue-500":"text-gray-400")}>{DAYS_SHORT[di]}</span>
-                    <span className={cn("mt-1 flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold",isToday?"bg-blue-500 text-white shadow-sm":"text-gray-800 dark:text-gray-200")}>{day.getDate()}</span>
-                  </div>
-                );
-              })}
-              <div className="w-44 flex-shrink-0 border-l-2 border-blue-100 dark:border-blue-900/50 bg-blue-50/30 flex items-center justify-between px-3 py-2.5">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-blue-500">File d'attente</span>
-                <button onClick={()=>{setFormError("");setModal("queue");}} className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-white hover:bg-blue-600 transition-colors shadow-sm"><Plus className="h-3 w-3"/></button>
-              </div>
-            </div>
+          <div className="flex-1 bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden min-h-0">
+            {/* Single scrollable container — évite le décalage scrollbar header/body */}
+            <div className="h-full overflow-y-auto">
 
-            {/* Body */}
-            <div className="flex flex-1 overflow-y-auto min-h-0">
-              <div className="w-14 flex-shrink-0 border-r border-gray-100 dark:border-gray-800">
-                {TIME_SLOTS.map(t=>(
-                  <div key={t} className="h-8 flex items-center justify-end pr-2 border-t border-gray-100 dark:border-gray-800 text-[10px]">
-                    <span className={cn("text-[10px] font-medium", t.endsWith(":00") ? "text-gray-500 dark:text-gray-400" : "text-gray-300 dark:text-gray-600")}>{t.endsWith(":00") ? t : ""}</span>
-                  </div>
-                ))}
-              </div>
-
-              {days.map(day=>{
-                const dk=dateKey(day),isToday=dk===todayKey;
-                return(
-                  <div key={dk} className={cn("flex-1 min-w-0 border-r border-gray-100 dark:border-gray-800 last:border-r-0",isToday&&"bg-blue-50/20")}>
-                    {TIME_SLOTS.map(time=>{
-                      const slotId=`${dk}:${time}`, slotPlacements=bySlot.get(slotId)??[];
-                      return(
-                        <TimeSlot key={time} slotId={slotId} dateStr={dk} time={time}
-                          onTap={()=>openFromSlot(dk,time)} isOver={dropTarget===slotId}>
-                          {slotPlacements.map(p=>(
-                            <Draggable key={p.id}
-                              data={{kind:"placement",placement:p}}
-                              onTap={()=>openDetail(p)}
-                              cbs={dragCbs}
-                              className="absolute inset-x-0.5 top-0.5 bottom-0.5 flex items-center px-1.5 rounded-lg z-10 bg-gradient-to-br from-blue-500 to-blue-600 text-white text-[10px] font-semibold shadow-sm"
-                            >
-                              <span className="truncate">{fullName(p.student)}</span>
-                            </Draggable>
-                          ))}
-                        </TimeSlot>
-                      );
-                    })}
-                  </div>
-                );
-              })}
-
-              {/* Queue */}
-              <div className="w-44 flex-shrink-0 border-l-2 border-blue-100 dark:border-blue-900/50 bg-blue-50/20 overflow-y-auto p-2 space-y-1.5">
-                {students.length===0?(
-                  <div className="h-24 flex flex-col items-center justify-center text-center gap-1">
-                    <p className="text-xs text-gray-400">Aucun élève</p>
-                    <button onClick={()=>setModal("queue")} className="text-xs text-blue-500 underline">Ajouter</button>
-                  </div>
-                ):students.map(s=>(
-                  <Draggable key={s.id}
-                    data={{kind:"student",student:s}}
-                    onTap={()=>openFromQueue(s)}
-                    cbs={dragCbs}
-                    className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 flex items-center gap-2 px-2 py-1.5 select-none"
-                  >
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 text-[10px] font-bold flex-shrink-0">{initials(s)}</div>
-                    <div className="min-w-0 flex-1 leading-tight">
-                      <p className="text-[11px] font-semibold text-gray-900 dark:text-gray-100 truncate">{fullName(s)}</p>
-                      <p className="text-[9px] text-gray-400 truncate">{s.drivingHours}h · {drivingDate(s.lastDrivingDate)}</p>
+              {/* Day headers — sticky */}
+              <div className="flex border-b-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 sticky top-0 z-20">
+                <div className="w-14 flex-shrink-0 border-r border-gray-200 dark:border-gray-700"/>
+                {days.map((day,di)=>{
+                  const dk=dateKey(day),isToday=dk===todayKey;
+                  return(
+                    <div key={dk} className={cn("flex-1 min-w-0 flex flex-col items-center py-2.5 border-r border-gray-100 dark:border-gray-800 last:border-r-0",isToday&&"bg-blue-50/60 dark:bg-blue-900/20")}>
+                      <span className={cn("text-[10px] font-bold uppercase tracking-widest",isToday?"text-blue-500":"text-gray-400")}>{DAYS_SHORT[di]}</span>
+                      <span className={cn("mt-1 flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold",isToday?"bg-blue-500 text-white shadow-sm":"text-gray-800 dark:text-gray-200")}>{day.getDate()}</span>
                     </div>
-                  </Draggable>
-                ))}
+                  );
+                })}
+                <div className="w-44 flex-shrink-0 border-l-2 border-blue-100 dark:border-blue-900/50 bg-blue-50/30 dark:bg-blue-900/10 flex items-center justify-between px-3 py-2.5">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-blue-500">File d'attente</span>
+                  <button onClick={()=>{setFormError("");setModal("queue");}} className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-white hover:bg-blue-600 transition-colors shadow-sm"><Plus className="h-3 w-3"/></button>
+                </div>
               </div>
+
+              {/* Body: time + jours + queue dans le même flex → pas de décalage */}
+              <div className="flex">
+                <div className="w-14 flex-shrink-0 border-r border-gray-100 dark:border-gray-800">
+                  {TIME_SLOTS.map(t=>(
+                    <div key={t} className="h-8 flex items-center justify-end pr-2 border-t border-gray-100 dark:border-gray-800">
+                      <span className={cn("text-[10px] font-medium", t.endsWith(":00") ? "text-gray-500 dark:text-gray-400" : "text-gray-300 dark:text-gray-600")}>{t.endsWith(":00") ? t : ""}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {days.map(day=>{
+                  const dk=dateKey(day),isToday=dk===todayKey;
+                  return(
+                    <div key={dk} className={cn("flex-1 min-w-0 border-r border-gray-100 dark:border-gray-800 last:border-r-0",isToday&&"bg-blue-50/10 dark:bg-blue-900/10")}>
+                      {TIME_SLOTS.map(time=>{
+                        const slotId=`${dk}:${time}`, slotPlacements=bySlot.get(slotId)??[];
+                        return(
+                          <TimeSlot key={time} slotId={slotId} dateStr={dk} time={time}
+                            onTap={()=>openFromSlot(dk,time)} isOver={dropTarget===slotId}>
+                            {slotPlacements.map(p=>(
+                              <Draggable key={p.id}
+                                data={{kind:"placement",placement:p}}
+                                onTap={()=>openDetail(p)}
+                                cbs={dragCbs}
+                                className="absolute inset-x-0.5 top-0.5 bottom-0.5 flex items-center px-1.5 rounded-lg z-10 bg-gradient-to-br from-blue-500 to-blue-600 text-white text-[10px] font-semibold shadow-sm"
+                              >
+                                <span className="truncate">{fullName(p.student)}</span>
+                              </Draggable>
+                            ))}
+                          </TimeSlot>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+
+                {/* Queue */}
+                <div className="w-44 flex-shrink-0 border-l-2 border-blue-100 dark:border-blue-900/50 bg-blue-50/20 dark:bg-blue-900/10 p-2 space-y-1.5">
+                  {students.length===0?(
+                    <div className="h-24 flex flex-col items-center justify-center text-center gap-1">
+                      <p className="text-xs text-gray-400">Aucun élève</p>
+                      <button onClick={()=>setModal("queue")} className="text-xs text-blue-500 underline">Ajouter</button>
+                    </div>
+                  ):students.map(s=>(
+                    <Draggable key={s.id}
+                      data={{kind:"student",student:s}}
+                      onTap={()=>openFromQueue(s)}
+                      cbs={dragCbs}
+                      className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 flex items-center gap-2 px-2 py-1.5 select-none"
+                    >
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 text-[10px] font-bold flex-shrink-0">{initials(s)}</div>
+                      <div className="min-w-0 flex-1 leading-tight">
+                        <p className="text-[11px] font-semibold text-gray-900 dark:text-gray-100 truncate">{fullName(s)}</p>
+                        <p className="text-[9px] text-gray-400 truncate">{s.drivingHours}h · {drivingDate(s.lastDrivingDate)}</p>
+                      </div>
+                    </Draggable>
+                  ))}
+                </div>
+              </div>
+
             </div>
           </div>
 
