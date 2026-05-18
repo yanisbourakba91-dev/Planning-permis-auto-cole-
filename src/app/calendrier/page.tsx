@@ -327,6 +327,8 @@ export default function CalendrierPage() {
   const monthAvailable = monthData?Math.max(0,monthData.totalSlots-monthData.usedSlots):null;
   const bySlot = new Map<string,Placement[]>();
   placements.forEach(p=>{const k=`${p.date.slice(0,10)}:${p.time}`;bySlot.set(k,[...(bySlot.get(k)??[]),p]);});
+  const placedIds = new Set(placements.map(p=>p.student.id));
+  const queueStudents = students.filter(s=>!placedIds.has(s.id));
   const studentOptions = students.map(s=>({value:s.id,label:fullName(s)}));
 
   return (
@@ -423,12 +425,12 @@ export default function CalendrierPage() {
 
                 {/* Queue */}
                 <div className="w-44 flex-shrink-0 border-l-2 border-blue-100 dark:border-blue-900/50 bg-blue-50/20 dark:bg-blue-900/10 p-2 space-y-1.5">
-                  {students.length===0?(
+                  {queueStudents.length===0?(
                     <div className="h-24 flex flex-col items-center justify-center text-center gap-1">
-                      <p className="text-xs text-gray-400">Aucun élève</p>
+                      <p className="text-xs text-gray-400">{students.length===0?"Aucun élève":"Tous placés ✓"}</p>
                       <button onClick={()=>setModal("queue")} className="text-xs text-blue-500 underline">Ajouter</button>
                     </div>
-                  ):students.map(s=>(
+                  ):queueStudents.map(s=>(
                     <Draggable key={s.id}
                       data={{kind:"student",student:s}}
                       onTap={()=>openFromQueue(s)}
