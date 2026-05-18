@@ -26,7 +26,7 @@ interface Student {
 interface ExamMonthData { year: number; month: number; totalSlots: number; usedSlots: number; }
 type DragData = { kind: "student"; student: Student } | { kind: "placement"; placement: Placement };
 
-const TIME_SLOTS = ["08:00","09:00","10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00"];
+const TIME_SLOTS = ["08:00","08:30","09:00","09:30","10:00","10:30","11:00","11:30","12:00","12:30","13:00","13:30","14:00","14:30","15:00","15:30","16:00","16:30","17:00","17:30","18:00","18:30"];
 const DAYS_SHORT = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
 const MONTH_NAMES = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
 
@@ -114,7 +114,7 @@ function TimeSlot({ slotId, dateStr, time, children, onTap, isOver }: {
       data-slot="1" data-date={dateStr} data-time={time}
       onClick={onTap}
       className={cn(
-        "h-14 border-t border-gray-100 dark:border-gray-800/60 relative cursor-pointer transition-colors duration-75",
+        "h-8 border-t border-gray-100 dark:border-gray-800/60 relative cursor-pointer transition-colors duration-75",
         isOver ? "bg-blue-100 dark:bg-blue-900/30 ring-2 ring-inset ring-blue-500" : "hover:bg-gray-50/80 dark:hover:bg-gray-800/30"
       )}
     >
@@ -387,7 +387,7 @@ export default function CalendrierPage() {
             <div className="flex flex-1 overflow-y-auto min-h-0">
               <div className="w-14 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-gray-50/30">
                 {TIME_SLOTS.map(t=>(
-                  <div key={t} className="h-14 flex items-start justify-center pt-1.5 border-t border-gray-100 dark:border-gray-800">
+                  <div key={t} className="h-8 flex items-center justify-center border-t border-gray-100 dark:border-gray-800 text-[10px]">
                     <span className="text-[10px] font-medium text-gray-400">{t}</span>
                   </div>
                 ))}
