@@ -123,35 +123,33 @@ function TimeSlot({ slotId, dateStr, time, children, onTap, isOver }: {
   );
 }
 
-/* ─────────── EditableCounter ─────────── */
-function EditableCounter({ label, value, sub, color, onSave }: {
-  label: string; value: number|null; sub?: string; color: "blue"|"green"; onSave?: (v: number) => void;
+/* ─────────── MiniCounter (compact, inline dans toolbar) ─────────── */
+function MiniCounter({ label, value, color, onSave }: {
+  label: string; value: number|null; color: "blue"|"green"; onSave?: (v: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [input, setInput] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
-  const cls = color==="blue" ? "bg-blue-50 border border-blue-100 text-blue-600" : "bg-green-50 border border-green-100 text-green-600";
+  const cls = color==="blue"
+    ? "bg-blue-50 dark:bg-blue-900/30 border-blue-100 dark:border-blue-800 text-blue-600 dark:text-blue-400"
+    : "bg-green-50 dark:bg-green-900/30 border-green-100 dark:border-green-800 text-green-600 dark:text-green-400";
   function start() { if(!onSave)return; setInput(value!==null?String(value):""); setEditing(true); setTimeout(()=>inputRef.current?.focus(),40); }
   function save() { const n=parseInt(input); if(!isNaN(n)&&n>=0&&onSave) onSave(n); setEditing(false); }
-  return (
-    <div className={cn("flex flex-col items-center px-5 py-3 rounded-2xl min-w-[150px] shadow-sm",cls,onSave&&"cursor-pointer")} onClick={!editing?start:undefined}>
-      <span className="text-[10px] font-semibold uppercase tracking-wider opacity-60 mb-1 text-center leading-tight">{label}</span>
-      {editing ? (
-        <div className="flex items-center gap-1.5" onClick={e=>e.stopPropagation()}>
-          <input ref={inputRef} type="number" min={0} value={input} onChange={e=>setInput(e.target.value)}
-            onKeyDown={e=>{if(e.key==="Enter")save();if(e.key==="Escape")setEditing(false);}}
-            className="w-16 text-center text-2xl font-bold bg-transparent border-b-2 border-current focus:outline-none"/>
-          <button onClick={save}><Check className="h-4 w-4"/></button>
-          <button onClick={()=>setEditing(false)}><X className="h-3 w-3 opacity-50"/></button>
-        </div>
-      ) : (
-        <div className="flex items-center gap-1.5">
-          <span className="text-2xl font-bold">{value!==null?value:"—"}</span>
-          {onSave&&<Pencil className="h-3 w-3 opacity-40"/>}
-        </div>
-      )}
-      {sub&&<span className="text-[9px] opacity-50 mt-0.5 text-center leading-tight">{sub}</span>}
+  if (editing) return (
+    <div className={cn("flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-semibold",cls)}>
+      <input ref={inputRef} type="number" min={0} value={input} onChange={e=>setInput(e.target.value)}
+        onKeyDown={e=>{if(e.key==="Enter")save();if(e.key==="Escape")setEditing(false);}}
+        className="w-10 bg-transparent border-b border-current focus:outline-none text-center"/>
+      <button onClick={save}><Check className="h-3 w-3"/></button>
+      <button onClick={()=>setEditing(false)}><X className="h-3 w-3 opacity-50"/></button>
     </div>
+  );
+  return (
+    <button onClick={start} className={cn("flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-opacity hover:opacity-80",cls,onSave&&"cursor-pointer")}>
+      <span className="font-bold">{value!==null?value:"—"}</span>
+      <span className="opacity-60 font-normal">{label}</span>
+      {onSave&&<Pencil className="h-2.5 w-2.5 opacity-40"/>}
+    </button>
   );
 }
 
@@ -337,26 +335,26 @@ export default function CalendrierPage() {
       <div className="flex flex-col gap-4" style={{height:"calc(100vh - 57px)"}}>
 
         {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-3 flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
           <div className="flex items-center gap-1 bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 p-1">
             <button onClick={prev} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors"><ChevronLeft className="h-4 w-4"/></button>
             <span className="px-3 text-sm font-semibold text-gray-800 dark:text-gray-200 min-w-[210px] text-center">{view==="week"?weekLabel(days):`${MONTH_NAMES[curMonth-1]} ${curYear}`}</span>
             <button onClick={next} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors"><ChevronRight className="h-4 w-4"/></button>
           </div>
-          <button onClick={goToday} className="px-3 py-1.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors shadow-sm">Aujourd'hui</button>
-          <div className="flex rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-sm p-1 ml-auto">
-            <button onClick={()=>setView("week")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",view==="week"?"bg-blue-500 text-white shadow-sm":"text-gray-500 hover:text-gray-700")}><AlignJustify className="h-3.5 w-3.5"/> Semaine</button>
-            <button onClick={()=>setView("month")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",view==="month"?"bg-blue-500 text-white shadow-sm":"text-gray-500 hover:text-gray-700")}><LayoutGrid className="h-3.5 w-3.5"/> Mois</button>
+          <button onClick={goToday} className="px-3 py-1.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 transition-colors shadow-sm">Aujourd'hui</button>
+          <div className="flex items-center gap-2 ml-auto">
+            {view==="week"&&(
+              <>
+                <MiniCounter label="/ mois" value={monthAvailable} color="blue" onSave={saveMonthlyTotal}/>
+                <MiniCounter label="/ sem." value={Math.max(0,weeklyLimit-weekCount)} color="green" onSave={saveWeeklyLimit}/>
+              </>
+            )}
+            <div className="flex rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-sm p-1">
+              <button onClick={()=>setView("week")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",view==="week"?"bg-blue-500 text-white shadow-sm":"text-gray-500 hover:text-gray-700")}><AlignJustify className="h-3.5 w-3.5"/> Semaine</button>
+              <button onClick={()=>setView("month")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",view==="month"?"bg-blue-500 text-white shadow-sm":"text-gray-500 hover:text-gray-700")}><LayoutGrid className="h-3.5 w-3.5"/> Mois</button>
+            </div>
           </div>
         </div>
-
-        {/* Counters */}
-        {view==="week"&&(
-          <div className="flex gap-3 flex-wrap flex-shrink-0">
-            <EditableCounter label="Places restantes ce mois" value={monthAvailable} sub={monthData?`sur ${monthData.totalSlots} · cliquer`:"Cliquer pour définir"} color="blue" onSave={saveMonthlyTotal}/>
-            <EditableCounter label="Places cette semaine" value={Math.max(0,weeklyLimit-weekCount)} sub={`${weekCount} planifié${weekCount!==1?"s":""} · limite ${weeklyLimit} · cliquer`} color="green" onSave={saveWeeklyLimit}/>
-          </div>
-        )}
 
         {loading?(
           <div className="flex-1 flex items-center justify-center">
@@ -385,10 +383,10 @@ export default function CalendrierPage() {
 
             {/* Body */}
             <div className="flex flex-1 overflow-y-auto min-h-0">
-              <div className="w-14 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-gray-50/30">
+              <div className="w-14 flex-shrink-0 border-r border-gray-100 dark:border-gray-800">
                 {TIME_SLOTS.map(t=>(
-                  <div key={t} className="h-8 flex items-center justify-center border-t border-gray-100 dark:border-gray-800 text-[10px]">
-                    <span className="text-[10px] font-medium text-gray-400">{t}</span>
+                  <div key={t} className="h-8 flex items-center justify-end pr-2 border-t border-gray-100 dark:border-gray-800 text-[10px]">
+                    <span className={cn("text-[10px] font-medium", t.endsWith(":00") ? "text-gray-500 dark:text-gray-400" : "text-gray-300 dark:text-gray-600")}>{t.endsWith(":00") ? t : ""}</span>
                   </div>
                 ))}
               </div>
