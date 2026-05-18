@@ -543,10 +543,8 @@ export default function CalendrierPage() {
       <Modal open={modal==="newStudent"} onClose={closeModal} title="Nouvel élève">
         <form onSubmit={submitStudent} className="space-y-3 mt-2">
           <Input label="Nom et prénom *" placeholder="Jean Dupont" value={sForm.lastName} onChange={e=>setSForm(f=>({...f,lastName:e.target.value,firstName:""}))} required/>
-          <div className="grid grid-cols-2 gap-3">
-            <Input label="Dernière date de conduite" type="date" value={sForm.lastDrivingDate} onChange={e=>setSForm(f=>({...f,lastDrivingDate:e.target.value}))}/>
-            <Input label="Heures de conduite" type="number" min="0" step="0.5" value={sForm.drivingHours} onChange={e=>setSForm(f=>({...f,drivingHours:e.target.value}))}/>
-          </div>
+          <Input label="Dernière date de conduite" type="date" value={sForm.lastDrivingDate} onChange={e=>setSForm(f=>({...f,lastDrivingDate:e.target.value}))}/>
+          <Input label="Heures de conduite" type="number" min="0" step="0.5" value={sForm.drivingHours} onChange={e=>setSForm(f=>({...f,drivingHours:e.target.value}))} placeholder="0"/>
           {formError&&<p className="text-sm text-red-500">{formError}</p>}
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={()=>setModal("queue")} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">Retour</button>
