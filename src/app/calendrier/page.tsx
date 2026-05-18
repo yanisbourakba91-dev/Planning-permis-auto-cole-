@@ -274,8 +274,10 @@ export default function CalendrierPage() {
     } else {
       const p = d.placement;
       if (p.date.slice(0,10) !== t.date || p.time !== t.time) {
+        // Optimistic update — no loading flicker
+        setPlacements(prev => prev.map(x => x.id === p.id ? { ...x, date: t.date, time: t.time } : x));
         fetch(`/api/placements/${p.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({date:t.date,time:t.time})})
-          .then(()=>fetchData()).catch(()=>{});
+          .catch(()=>{ fetchData(); }); // revert on error only
       }
     }
   };
