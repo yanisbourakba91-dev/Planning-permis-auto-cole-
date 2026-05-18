@@ -17,7 +17,7 @@ import {
 /* ─────────── Types ─────────── */
 interface Placement {
   id: string; date: string; time: string; instructor: string; examCenter: string;
-  notes?: string; student: { id: string; firstName: string; lastName: string };
+  notes?: string; student: { id: string; firstName: string; lastName: string; lastDrivingDate: string | null };
 }
 interface Student {
   id: string; firstName: string; lastName: string;
@@ -408,9 +408,10 @@ export default function CalendrierPage() {
                                 data={{kind:"placement",placement:p}}
                                 onTap={()=>openDetail(p)}
                                 cbs={dragCbs}
-                                className="absolute inset-x-0.5 top-0.5 bottom-0.5 flex items-center px-1.5 rounded-lg z-10 bg-gradient-to-br from-blue-500 to-blue-600 text-white text-[10px] font-semibold shadow-sm"
+                                className="absolute inset-x-0.5 top-0.5 bottom-0.5 flex items-center justify-between gap-1 px-1.5 rounded-lg z-10 bg-gradient-to-br from-blue-500 to-blue-600 text-white text-[10px] font-semibold shadow-sm"
                               >
                                 <span className="truncate">{fullName(p.student)}</span>
+                                {p.student.lastDrivingDate && <span className="opacity-70 font-normal flex-shrink-0">{drivingDate(p.student.lastDrivingDate)}</span>}
                               </Draggable>
                             ))}
                           </TimeSlot>
