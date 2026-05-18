@@ -546,14 +546,8 @@ export default function CalendrierPage() {
             <Input label="Prénom" placeholder="Jean" value={sForm.firstName} onChange={e=>setSForm(f=>({...f,firstName:e.target.value}))}/>
             <Input label="Nom *" placeholder="Dupont" value={sForm.lastName} onChange={e=>setSForm(f=>({...f,lastName:e.target.value}))} required/>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Input label="Email" type="email" value={sForm.email} onChange={e=>setSForm(f=>({...f,email:e.target.value}))} placeholder="Optionnel"/>
-            <Input label="Téléphone" type="tel" value={sForm.phone} onChange={e=>setSForm(f=>({...f,phone:e.target.value}))} placeholder="Optionnel"/>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Input label="Heures de conduite" type="number" min="0" step="0.5" value={sForm.drivingHours} onChange={e=>setSForm(f=>({...f,drivingHours:e.target.value}))}/>
-            <Input label="Dernière heure de conduite" type="date" value={sForm.lastDrivingDate} onChange={e=>setSForm(f=>({...f,lastDrivingDate:e.target.value}))}/>
-          </div>
+          <Input label="Dernière date de conduite" type="date" value={sForm.lastDrivingDate} onChange={e=>setSForm(f=>({...f,lastDrivingDate:e.target.value}))}/>
+          <Input label="Heures de conduite" type="number" min="0" step="0.5" value={sForm.drivingHours} onChange={e=>setSForm(f=>({...f,drivingHours:e.target.value}))}/>
           {formError&&<p className="text-sm text-red-500">{formError}</p>}
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={()=>setModal("queue")} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">Retour</button>
