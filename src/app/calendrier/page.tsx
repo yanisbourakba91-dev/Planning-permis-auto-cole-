@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useDragTouch, SlotTarget } from "@/hooks/useDragTouch";
 import { useSession } from "next-auth/react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Modal } from "@/components/ui/modal";
@@ -13,621 +14,448 @@ import {
   AlignJustify, LayoutGrid, Pencil, Check, X,
 } from "lucide-react";
 
-/* ── Types ── */
+/* ─────────── Types ─────────── */
 interface Placement {
-  id: string;
-  date: string;
-  time: string;
-  instructor: string;
-  examCenter: string;
-  notes?: string;
-  student: { id: string; firstName: string; lastName: string };
+  id: string; date: string; time: string; instructor: string; examCenter: string;
+  notes?: string; student: { id: string; firstName: string; lastName: string };
 }
 interface Student {
-  id: string;
-  firstName: string;
-  lastName: string;
-  drivingHours: number;
-  lastDrivingDate: string | null;
+  id: string; firstName: string; lastName: string;
+  drivingHours: number; lastDrivingDate: string | null;
 }
-interface ExamMonthData {
-  id?: string;
-  year: number;
-  month: number;
-  totalSlots: number;
-  usedSlots: number;
-}
-type DragInfo =
-  | { kind: "queue"; student: Student }
-  | { kind: "placement"; placement: Placement };
+interface ExamMonthData { year: number; month: number; totalSlots: number; usedSlots: number; }
+type DragData = { kind: "student"; student: Student } | { kind: "placement"; placement: Placement };
 
-/* ── Constants ── */
 const TIME_SLOTS = ["08:00","09:00","10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00"];
 const DAYS_SHORT = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
 const MONTH_NAMES = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
 
-/* ── Helpers ── */
-function getWeekStart(date: Date): Date {
-  const d = new Date(date);
-  const day = d.getDay();
-  d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
-  d.setHours(0, 0, 0, 0);
-  return d;
+function weekStartOf(d: Date): Date {
+  const r = new Date(d); const day = r.getDay();
+  r.setDate(r.getDate()-(day===0?6:day-1)); r.setHours(0,0,0,0); return r;
 }
-function getWeekDays(start: Date): Date[] {
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(start);
-    d.setDate(d.getDate() + i);
-    return d;
-  });
+function weekDays(start: Date): Date[] {
+  return Array.from({length:7},(_,i)=>{ const d=new Date(start); d.setDate(d.getDate()+i); return d; });
 }
-function toKey(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-function shiftWeek(d: Date, n: number): Date {
-  const r = new Date(d);
-  r.setDate(r.getDate() + n * 7);
-  return r;
-}
-function drivingDate(s: string | null): string {
-  if (!s) return "—";
-  const d = new Date(s);
-  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-function getDaysInMonth(y: number, m: number) { return new Date(y, m, 0).getDate(); }
-function getFirstOffset(y: number, m: number) {
-  const d = new Date(y, m - 1, 1).getDay();
-  return d === 0 ? 6 : d - 1;
-}
-function initials(s: Student): string {
-  return ((s.firstName?.[0] || "") + (s.lastName?.[0] || "")).toUpperCase() || "?";
-}
-function getWeekLabel(days: Date[]): string {
-  const first = days[0];
-  const last = days[6];
-  if (first.getMonth() === last.getMonth()) {
-    return `${first.getDate()} – ${last.getDate()} ${MONTH_NAMES[first.getMonth()]} ${first.getFullYear()}`;
-  }
-  return `${first.getDate()} ${MONTH_NAMES[first.getMonth()]} – ${last.getDate()} ${MONTH_NAMES[last.getMonth()]} ${last.getFullYear()}`;
+function dateKey(d: Date) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+function shiftWeek(d: Date, n: number) { const r=new Date(d); r.setDate(r.getDate()+n*7); return r; }
+function fmt2(n: number) { return String(n).padStart(2,"0"); }
+function drivingDate(s: string|null) { if(!s)return"—"; const d=new Date(s); return `${fmt2(d.getDate())}/${fmt2(d.getMonth()+1)}`; }
+function getDaysInMonth(y: number, m: number) { return new Date(y,m,0).getDate(); }
+function getFirstOffset(y: number, m: number) { const d=new Date(y,m-1,1).getDay(); return d===0?6:d-1; }
+function initials(s: Student) { return ((s.firstName?.[0]??"")+(s.lastName?.[0]??"")).toUpperCase()||"?"; }
+function fullName(s: { firstName: string; lastName: string }) { return s.firstName?`${s.firstName} ${s.lastName}`:s.lastName; }
+function weekLabel(days: Date[]) {
+  const [f,l]=[days[0],days[6]];
+  return f.getMonth()===l.getMonth()
+    ?`${f.getDate()} – ${l.getDate()} ${MONTH_NAMES[f.getMonth()]} ${f.getFullYear()}`
+    :`${f.getDate()} ${MONTH_NAMES[f.getMonth()]} – ${l.getDate()} ${MONTH_NAMES[l.getMonth()]} ${l.getFullYear()}`;
 }
 
-/* ── Editable counter ── */
-function EditableCounter({
-  label, value, sub, color, onSave,
+/* ═══════════════════════════════════════════════════════
+   DRAG — useDragTouch (src/hooks/useDragTouch.ts)
+   Clone visuel ajouté au <body> position:fixed.
+   touchstart/touchmove/touchend natifs passive:false.
+═══════════════════════════════════════════════════════ */
+
+type DragCbs = {
+  onStart:  (d: DragData) => void;
+  onOver:   (t: SlotTarget | null) => void;
+  onDrop:   (t: SlotTarget | null, d: DragData) => void;
+  onCancel: () => void;
+};
+
+function Draggable({
+  data,
+  onTap,
+  cbs,
+  className,
+  children,
 }: {
-  label: string;
-  value: number | null;
-  sub?: string;
-  color: "blue" | "green" | "orange";
-  onSave?: (v: number) => void;
+  data: DragData;
+  onTap: () => void;
+  cbs: React.RefObject<DragCbs>;
+  className?: string;
+  children: React.ReactNode;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [input, setInput] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
 
-  const colorMap = {
-    blue: "text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400",
-    green: "text-green-600 bg-green-50 dark:bg-green-900/20 dark:text-green-400",
-    orange: "text-orange-600 bg-orange-50 dark:bg-orange-900/20 dark:text-orange-400",
-  };
-
-  function startEdit() {
-    if (!onSave) return;
-    setInput(value !== null ? String(value) : "");
-    setEditing(true);
-    setTimeout(() => inputRef.current?.focus(), 50);
-  }
-  function save() {
-    const n = parseInt(input);
-    if (!isNaN(n) && n >= 0 && onSave) onSave(n);
-    setEditing(false);
-  }
+  useDragTouch(ref, {
+    onDragStart: ()       => cbs.current.onStart(data),
+    onDragOver:  (target) => cbs.current.onOver(target),
+    onDrop:      (target) => cbs.current.onDrop(target, data),
+    onTap:       onTap,
+    onCancel:    ()       => cbs.current.onCancel(),
+  });
 
   return (
     <div
-      className={cn("flex flex-col items-center justify-center px-5 py-3 rounded-2xl min-w-[160px]", colorMap[color], onSave && "cursor-pointer")}
-      onClick={!editing ? startEdit : undefined}
+      ref={ref}
+      style={{
+        touchAction:        "none",
+        userSelect:         "none",
+        WebkitUserSelect:   "none",
+        WebkitTouchCallout: "none",
+      } as React.CSSProperties}
+      className={cn("cursor-grab active:cursor-grabbing select-none", className)}
     >
-      <span className="text-[11px] font-semibold uppercase tracking-wider opacity-60 mb-1 text-center">{label}</span>
-      {editing ? (
-        <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-          <input
-            ref={inputRef}
-            type="number"
-            min={0}
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
-            className="w-16 text-center text-2xl font-bold bg-transparent border-b-2 border-current focus:outline-none"
-          />
-          <button onClick={save} className="opacity-70 hover:opacity-100"><Check className="h-4 w-4" /></button>
-          <button onClick={() => setEditing(false)} className="opacity-50 hover:opacity-80"><X className="h-3 w-3" /></button>
-        </div>
-      ) : (
-        <div className="flex items-center gap-1.5">
-          <span className="text-2xl font-bold">{value !== null ? value : "—"}</span>
-          {onSave && <Pencil className="h-3 w-3 opacity-40" />}
-        </div>
-      )}
-      {sub && <span className="text-[10px] opacity-50 mt-0.5 text-center">{sub}</span>}
+      {children}
     </div>
   );
 }
 
-/* ── Main page ── */
+/* ─────────── TimeSlot (drop target via data attrs) ─────────── */
+function TimeSlot({ slotId, dateStr, time, children, onTap, isOver }: {
+  slotId: string; dateStr: string; time: string; children: React.ReactNode;
+  onTap: () => void; isOver: boolean;
+}) {
+  return (
+    <div
+      data-slot="1" data-date={dateStr} data-time={time}
+      onClick={onTap}
+      className={cn(
+        "h-14 border-t border-gray-100 dark:border-gray-800/60 relative cursor-pointer transition-colors duration-75",
+        isOver ? "bg-blue-100 dark:bg-blue-900/30 ring-2 ring-inset ring-blue-500" : "hover:bg-gray-50/80 dark:hover:bg-gray-800/30"
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/* ─────────── EditableCounter ─────────── */
+function EditableCounter({ label, value, sub, color, onSave }: {
+  label: string; value: number|null; sub?: string; color: "blue"|"green"; onSave?: (v: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [input, setInput] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const cls = color==="blue" ? "bg-blue-50 border border-blue-100 text-blue-600" : "bg-green-50 border border-green-100 text-green-600";
+  function start() { if(!onSave)return; setInput(value!==null?String(value):""); setEditing(true); setTimeout(()=>inputRef.current?.focus(),40); }
+  function save() { const n=parseInt(input); if(!isNaN(n)&&n>=0&&onSave) onSave(n); setEditing(false); }
+  return (
+    <div className={cn("flex flex-col items-center px-5 py-3 rounded-2xl min-w-[150px] shadow-sm",cls,onSave&&"cursor-pointer")} onClick={!editing?start:undefined}>
+      <span className="text-[10px] font-semibold uppercase tracking-wider opacity-60 mb-1 text-center leading-tight">{label}</span>
+      {editing ? (
+        <div className="flex items-center gap-1.5" onClick={e=>e.stopPropagation()}>
+          <input ref={inputRef} type="number" min={0} value={input} onChange={e=>setInput(e.target.value)}
+            onKeyDown={e=>{if(e.key==="Enter")save();if(e.key==="Escape")setEditing(false);}}
+            className="w-16 text-center text-2xl font-bold bg-transparent border-b-2 border-current focus:outline-none"/>
+          <button onClick={save}><Check className="h-4 w-4"/></button>
+          <button onClick={()=>setEditing(false)}><X className="h-3 w-3 opacity-50"/></button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5">
+          <span className="text-2xl font-bold">{value!==null?value:"—"}</span>
+          {onSave&&<Pencil className="h-3 w-3 opacity-40"/>}
+        </div>
+      )}
+      {sub&&<span className="text-[9px] opacity-50 mt-0.5 text-center leading-tight">{sub}</span>}
+    </div>
+  );
+}
+
+/* ─────────── Debug panel (iPad sans DevTools) ─────────── */
+function DebugPanel() {
+  const [logs, setLogs] = useState<string[]>([]);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    (window as unknown as Record<string, unknown>).__dragLog = (msg: string) => {
+      setLogs(prev => [`${new Date().toISOString().slice(11,23)} ${msg}`, ...prev].slice(0, 20));
+    };
+  }, []);
+
+  if (!visible) return (
+    <button
+      onClick={() => setVisible(true)}
+      className="fixed bottom-4 right-4 z-[99999] bg-black text-white text-xs px-3 py-2 rounded-full opacity-70"
+    >
+      DEBUG
+    </button>
+  );
+
+  return (
+    <div className="fixed bottom-0 left-0 right-0 z-[99999] bg-black/90 text-green-400 text-[10px] font-mono p-2 max-h-48 overflow-y-auto">
+      <div className="flex justify-between items-center mb-1">
+        <span className="text-white font-bold">DRAG DEBUG</span>
+        <button onClick={() => setLogs([])} className="text-yellow-400 mr-2">CLEAR</button>
+        <button onClick={() => setVisible(false)} className="text-red-400">FERMER</button>
+      </div>
+      {logs.length === 0 && <p className="text-gray-500">En attente d'events touch...</p>}
+      {logs.map((l, i) => <div key={i}>{l}</div>)}
+    </div>
+  );
+}
+
+function dragLog(msg: string) {
+  const fn = (window as unknown as Record<string, unknown>).__dragLog;
+  if (typeof fn === "function") (fn as (m: string) => void)(msg);
+}
+
+/* ═══════════════════════════════════════ MAIN PAGE ═══════════════════════════════════════ */
 export default function CalendrierPage() {
   const { data: session } = useSession();
   const now = new Date();
-  const todayKey = toKey(now);
+  const todayKey = dateKey(now);
 
-  const [view, setView] = useState<"week" | "month">("week");
-  const [weekStart, setWeekStart] = useState(() => getWeekStart(now));
-  const [currentYear, setCurrentYear] = useState(now.getFullYear());
-  const [currentMonth, setCurrentMonth] = useState(now.getMonth() + 1);
+  const [view, setView]         = useState<"week"|"month">("week");
+  const [wStart, setWStart]     = useState(()=>weekStartOf(now));
+  const [curYear, setCurYear]   = useState(now.getFullYear());
+  const [curMonth, setCurMonth] = useState(now.getMonth()+1);
 
   const [placements, setPlacements] = useState<Placement[]>([]);
-  const [students, setStudents] = useState<Student[]>([]);
-  const [monthData, setMonthData] = useState<ExamMonthData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [students,   setStudents]   = useState<Student[]>([]);
+  const [monthData,  setMonthData]  = useState<ExamMonthData|null>(null);
+  const [loading,    setLoading]    = useState(true);
 
-  /* Drag & drop */
-  const [dragInfo, setDragInfo] = useState<DragInfo | null>(null);
-  const [dropTarget, setDropTarget] = useState<string | null>(null);
-  const dragCounters = useRef<Map<string, number>>(new Map());
+  const [weeklyLimit, setWeeklyLimit] = useState(10);
+  useEffect(()=>{ const s=localStorage.getItem("planpermis_weekly_limit"); if(s) setWeeklyLimit(parseInt(s)); },[]);
+  function saveWeeklyLimit(v: number) { setWeeklyLimit(v); localStorage.setItem("planpermis_weekly_limit",String(v)); }
 
-  /* Weekly limit (localStorage) */
-  const [weeklyLimit, setWeeklyLimit] = useState<number>(10);
-  useEffect(() => {
-    const stored = localStorage.getItem("planpermis_weekly_limit");
-    if (stored) setWeeklyLimit(parseInt(stored));
-  }, []);
-  function saveWeeklyLimit(v: number) {
-    setWeeklyLimit(v);
-    localStorage.setItem("planpermis_weekly_limit", String(v));
-  }
+  /* ── Drag state ── */
+  const [dropTarget, setDropTarget] = useState<string|null>(null);
 
-  type ModalType = "add" | "detail" | "queue" | "newStudent" | null;
-  const [modal, setModal] = useState<ModalType>(null);
-  const [selectedPlacement, setSelectedPlacement] = useState<Placement | null>(null);
-  const [queueStudent, setQueueStudent] = useState<Student | null>(null);
+  /* Stable callbacks ref — updated each render to keep closures fresh */
+  const dragCbs = useRef<DragCbs>({
+    onStart:  () => {},
+    onOver:   () => {},
+    onDrop:   () => {},
+    onCancel: () => {},
+  });
 
-  const [pForm, setPForm] = useState({ studentId: "", date: "", time: "09:00", instructor: "", examCenter: "", notes: "" });
-  const [sForm, setSForm] = useState({ firstName: "", lastName: "", email: "", phone: "", drivingHours: "0", lastDrivingDate: "" });
-  const [formError, setFormError] = useState("");
-  const [formLoading, setFormLoading] = useState(false);
+  /* Modals */
+  type ModalKind = "add"|"detail"|"queue"|"newStudent"|null;
+  const [modal,        setModal]        = useState<ModalKind>(null);
+  const [selPlacement, setSelPlacement] = useState<Placement|null>(null);
+  const [queueStu,     setQueueStu]     = useState<Student|null>(null);
+  const [pForm,        setPForm]        = useState({studentId:"",date:"",time:"09:00",instructor:"",examCenter:"",notes:""});
+  const [sForm,        setSForm]        = useState({firstName:"",lastName:"",email:"",phone:"",drivingHours:"0",lastDrivingDate:""});
+  const [formError,    setFormError]    = useState("");
+  const [formLoading,  setFormLoading]  = useState(false);
 
-  /* ── Fetch ── */
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const weekDays = getWeekDays(weekStart);
-      const uniqMonths = [
-        ...new Map(
-          weekDays.map(d => [`${d.getFullYear()}-${d.getMonth() + 1}`, { year: d.getFullYear(), month: d.getMonth() + 1 }])
-        ).values(),
-      ];
-      const activeYear = view === "week" ? weekStart.getFullYear() : currentYear;
-      const activeMonth = view === "week" ? weekStart.getMonth() + 1 : currentMonth;
-
-      const placementFetches =
-        view === "week"
-          ? uniqMonths.map(({ year, month }) =>
-              fetch(`/api/placements?year=${year}&month=${month}`).then(r => r.json())
-            )
-          : [fetch(`/api/placements?year=${currentYear}&month=${currentMonth}`).then(r => r.json())];
-
-      const [studentsData, allMonthsData, ...placementArrays] = await Promise.all([
-        fetch("/api/eleves").then(r => r.json()),
-        fetch(`/api/places-examen?year=${activeYear}`).then(r => r.json()),
-        ...placementFetches,
+      const days = weekDays(wStart);
+      const uniqMonths = [...new Map(days.map(d=>[`${d.getFullYear()}-${d.getMonth()+1}`,{year:d.getFullYear(),month:d.getMonth()+1}])).values()];
+      const ay = view==="week"?wStart.getFullYear():curYear;
+      const am = view==="week"?wStart.getMonth()+1:curMonth;
+      const placeFetches = view==="week"
+        ? uniqMonths.map(({year,month})=>fetch(`/api/placements?year=${year}&month=${month}`).then(r=>r.json()))
+        : [fetch(`/api/placements?year=${curYear}&month=${curMonth}`).then(r=>r.json())];
+      const [stuData, allMonths, ...pArrays] = await Promise.all([
+        fetch("/api/eleves").then(r=>r.json()),
+        fetch(`/api/places-examen?year=${ay}`).then(r=>r.json()),
+        ...placeFetches,
       ]);
+      const all=(pArrays.flat() as unknown[]).filter((p):p is Placement=>!!p&&typeof p==="object"&&"id"in(p as object));
+      setPlacements(all); setStudents(Array.isArray(stuData)?stuData:[]);
+      setMonthData(Array.isArray(allMonths)?(allMonths as ExamMonthData[]).find(m=>m.month===am&&m.year===ay)??null:null);
+    } catch{/*silent*/} finally{setLoading(false);}
+  },[wStart,curYear,curMonth,view]);
+  useEffect(()=>{fetchData();},[fetchData]);
 
-      const all = (placementArrays.flat() as unknown[]).filter(
-        (p): p is Placement => !!p && typeof p === "object" && "id" in (p as object)
-      );
-      setPlacements(all);
-      setStudents(Array.isArray(studentsData) ? studentsData : []);
-
-      const found = Array.isArray(allMonthsData)
-        ? (allMonthsData as ExamMonthData[]).find(m => m.month === activeMonth && m.year === activeYear) || null
-        : null;
-      setMonthData(found);
-    } catch { /* silent */ }
-    finally { setLoading(false); }
-  }, [weekStart, currentYear, currentMonth, view]);
-
-  useEffect(() => { fetchData(); }, [fetchData]);
-
-  /* ── Save monthly total ── */
   async function saveMonthlyTotal(v: number) {
-    const activeYear = view === "week" ? weekStart.getFullYear() : currentYear;
-    const activeMonth = view === "week" ? weekStart.getMonth() + 1 : currentMonth;
-    const res = await fetch("/api/places-examen", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ year: activeYear, month: activeMonth, totalSlots: v }),
-    });
-    if (res.ok) setMonthData(await res.json());
+    const ay=view==="week"?wStart.getFullYear():curYear, am=view==="week"?wStart.getMonth()+1:curMonth;
+    const res=await fetch("/api/places-examen",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({year:ay,month:am,totalSlots:v})});
+    if(res.ok) setMonthData(await res.json());
   }
 
-  /* ── Navigation ── */
-  function prev() {
-    if (view === "week") { setWeekStart(s => shiftWeek(s, -1)); return; }
-    if (currentMonth === 1) { setCurrentMonth(12); setCurrentYear(y => y - 1); }
-    else setCurrentMonth(m => m - 1);
-  }
-  function next() {
-    if (view === "week") { setWeekStart(s => shiftWeek(s, 1)); return; }
-    if (currentMonth === 12) { setCurrentMonth(1); setCurrentYear(y => y + 1); }
-    else setCurrentMonth(m => m + 1);
-  }
-  function goToday() {
-    setWeekStart(getWeekStart(now));
-    setCurrentYear(now.getFullYear());
-    setCurrentMonth(now.getMonth() + 1);
-  }
-
-  /* ── Drag handlers ── */
-  function onDragEnd() {
-    setDragInfo(null);
+  /* ── Drag callbacks (updated each render) ── */
+  dragCbs.current.onStart  = () => {};
+  dragCbs.current.onOver   = (t) => { setDropTarget(t ? `${t.date}:${t.time}` : null); };
+  dragCbs.current.onDrop   = (t, d) => {
     setDropTarget(null);
-    dragCounters.current.clear();
-  }
-  function onSlotDragOver(e: React.DragEvent, slotKey: string) {
-    e.preventDefault();
-    if (dropTarget !== slotKey) setDropTarget(slotKey);
-  }
-  function onSlotDragEnter(slotKey: string) {
-    dragCounters.current.set(slotKey, (dragCounters.current.get(slotKey) || 0) + 1);
-    setDropTarget(slotKey);
-  }
-  function onSlotDragLeave(slotKey: string) {
-    const c = (dragCounters.current.get(slotKey) || 1) - 1;
-    dragCounters.current.set(slotKey, c);
-    if (c <= 0) setDropTarget(t => t === slotKey ? null : t);
-  }
-  function onSlotDrop(e: React.DragEvent, dateStr: string, time: string) {
-    e.preventDefault();
-    const slotKey = `${dateStr}:${time}`;
-    dragCounters.current.set(slotKey, 0);
-    setDropTarget(null);
-    if (!dragInfo) return;
-    if (dragInfo.kind === "queue") {
-      setPForm({ studentId: dragInfo.student.id, date: dateStr, time, instructor: "", examCenter: "", notes: "" });
-      setQueueStudent(null);
-      setFormError("");
-      setModal("add");
+    if (!t) return;
+    if (d.kind === "student") {
+      setPForm({studentId:d.student.id, date:t.date, time:t.time, instructor:"", examCenter:"", notes:""});
+      setQueueStu(null); setFormError(""); setModal("add");
     } else {
-      const p = dragInfo.placement;
-      if (p.date.slice(0, 10) !== dateStr || p.time !== time) {
-        moveExistingPlacement(p.id, dateStr, time);
+      const p = d.placement;
+      if (p.date.slice(0,10) !== t.date || p.time !== t.time) {
+        fetch(`/api/placements/${p.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({date:t.date,time:t.time})})
+          .then(()=>fetchData()).catch(()=>{});
       }
     }
-    setDragInfo(null);
-  }
+  };
+  dragCbs.current.onCancel = () => { setDropTarget(null); };
 
-  async function moveExistingPlacement(id: string, date: string, time: string) {
-    try {
-      await fetch(`/api/placements/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, time }),
-      });
-      fetchData();
-    } catch { /* silent */ }
-  }
+  function prev(){if(view==="week"){setWStart(s=>shiftWeek(s,-1));return;}if(curMonth===1){setCurMonth(12);setCurYear(y=>y-1);}else setCurMonth(m=>m-1);}
+  function next(){if(view==="week"){setWStart(s=>shiftWeek(s,1));return;}if(curMonth===12){setCurMonth(1);setCurYear(y=>y+1);}else setCurMonth(m=>m+1);}
+  function goToday(){setWStart(weekStartOf(now));setCurYear(now.getFullYear());setCurMonth(now.getMonth()+1);}
 
-  /* ── Modal helpers ── */
-  function openFromSlot(dateStr: string, time: string) {
-    if (dragInfo) return;
-    setQueueStudent(null);
-    setPForm({ studentId: "", date: dateStr, time, instructor: "", examCenter: "", notes: "" });
-    setFormError("");
-    setModal("add");
-  }
-  function openFromQueue(s: Student) {
-    setQueueStudent(s);
-    setPForm({ studentId: s.id, date: "", time: "09:00", instructor: "", examCenter: "", notes: "" });
-    setFormError("");
-    setModal("add");
-  }
-  function openDetail(p: Placement) { setSelectedPlacement(p); setModal("detail"); }
-  function closeModal() { setModal(null); setSelectedPlacement(null); setQueueStudent(null); setFormError(""); }
+  function openFromSlot(d:string,t:string){setQueueStu(null);setPForm({studentId:"",date:d,time:t,instructor:"",examCenter:"",notes:""});setFormError("");setModal("add");}
+  function openFromQueue(s:Student){setQueueStu(s);setPForm({studentId:s.id,date:"",time:"09:00",instructor:"",examCenter:"",notes:""});setFormError("");setModal("add");}
+  function openDetail(p:Placement){setSelPlacement(p);setModal("detail");}
+  function closeModal(){setModal(null);setSelPlacement(null);setQueueStu(null);setFormError("");}
 
-  /* ── Submits ── */
-  async function submitPlacement(e: React.FormEvent) {
+  async function submitPlacement(e:React.FormEvent){
     e.preventDefault();
-    if (!pForm.studentId || !pForm.date || !pForm.time) { setFormError("Élève, date et heure requis"); return; }
-    setFormLoading(true); setFormError("");
-    try {
-      const res = await fetch("/api/placements", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(pForm),
-      });
-      const data = await res.json();
-      if (!res.ok) { setFormError(data.error || "Erreur"); return; }
-      closeModal(); fetchData();
-    } catch { setFormError("Erreur serveur"); }
-    finally { setFormLoading(false); }
+    if(!pForm.studentId||!pForm.date||!pForm.time){setFormError("Élève, date et heure requis");return;}
+    setFormLoading(true);setFormError("");
+    try{
+      const res=await fetch("/api/placements",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(pForm)});
+      const data=await res.json(); if(!res.ok){setFormError(data.error||"Erreur");return;}
+      closeModal();fetchData();
+    }catch{setFormError("Erreur serveur");}finally{setFormLoading(false);}
   }
-
-  async function submitStudent(e: React.FormEvent) {
+  async function submitStudent(e:React.FormEvent){
     e.preventDefault();
-    if (!sForm.lastName.trim()) { setFormError("Le nom est requis"); return; }
-    setFormLoading(true); setFormError("");
-    try {
-      const res = await fetch("/api/eleves", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          firstName: sForm.firstName,
-          lastName: sForm.lastName,
-          email: sForm.email || undefined,
-          phone: sForm.phone || undefined,
-          drivingHours: parseFloat(sForm.drivingHours) || 0,
-          lastDrivingDate: sForm.lastDrivingDate || null,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setFormError(data.error || "Erreur"); return; }
-      setModal("queue");
-      setSForm({ firstName: "", lastName: "", email: "", phone: "", drivingHours: "0", lastDrivingDate: "" });
-      fetchData();
-    } catch { setFormError("Erreur serveur"); }
-    finally { setFormLoading(false); }
+    if(!sForm.lastName.trim()){setFormError("Le nom est requis");return;}
+    setFormLoading(true);setFormError("");
+    try{
+      const res=await fetch("/api/eleves",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...sForm,drivingHours:parseFloat(sForm.drivingHours)||0,lastDrivingDate:sForm.lastDrivingDate||null,email:sForm.email||undefined})});
+      const data=await res.json(); if(!res.ok){setFormError(data.error||"Erreur");return;}
+      setModal("queue");setSForm({firstName:"",lastName:"",email:"",phone:"",drivingHours:"0",lastDrivingDate:""});fetchData();
+    }catch{setFormError("Erreur serveur");}finally{setFormLoading(false);}
   }
-
-  async function deletePlacement(id: string) {
+  async function deletePlacement(id:string){
     setFormLoading(true);
-    try {
-      await fetch(`/api/placements/${id}`, { method: "DELETE" });
-      closeModal(); fetchData();
-    } catch { setFormError("Erreur serveur"); }
-    finally { setFormLoading(false); }
+    try{await fetch(`/api/placements/${id}`,{method:"DELETE"});closeModal();fetchData();}
+    catch{setFormError("Erreur serveur");}finally{setFormLoading(false);}
   }
 
-  /* ── Derived data ── */
-  const weekDays = getWeekDays(weekStart);
-  const weekKeys = new Set(weekDays.map(toKey));
-  const weekPlacementsCount = placements.filter(p => weekKeys.has(p.date.slice(0, 10))).length;
-  const weekAvailable = Math.max(0, weeklyLimit - weekPlacementsCount);
-  const monthAvailable = monthData ? Math.max(0, monthData.totalSlots - monthData.usedSlots) : null;
-  const isDragging = dragInfo !== null;
-
-  const bySlot = new Map<string, Placement[]>();
-  placements.forEach(p => {
-    const key = `${p.date.slice(0, 10)}:${p.time}`;
-    if (!bySlot.has(key)) bySlot.set(key, []);
-    bySlot.get(key)!.push(p);
-  });
-
-  const studentOptions = students.map(s => ({
-    value: s.id,
-    label: `${s.firstName ? s.firstName + " " : ""}${s.lastName}`.trim(),
-  }));
+  const days = weekDays(wStart);
+  const wKeys = new Set(days.map(dateKey));
+  const weekCount = placements.filter(p=>wKeys.has(p.date.slice(0,10))).length;
+  const monthAvailable = monthData?Math.max(0,monthData.totalSlots-monthData.usedSlots):null;
+  const bySlot = new Map<string,Placement[]>();
+  placements.forEach(p=>{const k=`${p.date.slice(0,10)}:${p.time}`;bySlot.set(k,[...(bySlot.get(k)??[]),p]);});
+  const studentOptions = students.map(s=>({value:s.id,label:fullName(s)}));
 
   return (
-    <AppLayout title="Calendrier" role={session?.user?.role || ""} schoolName={session?.user?.schoolName}>
-      <div className="flex flex-col gap-4" style={{ height: "calc(100vh - 57px)" }}>
+    <AppLayout title="Calendrier" role={session?.user?.role||""} schoolName={session?.user?.schoolName}>
 
-        {/* ── Top controls ── */}
+      <div className="flex flex-col gap-4" style={{height:"calc(100vh - 57px)"}}>
+
+        {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-3 flex-shrink-0">
           <div className="flex items-center gap-1 bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 p-1">
-            <button onClick={prev} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors">
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <span className="px-3 text-sm font-semibold text-gray-800 dark:text-gray-200 min-w-[200px] text-center">
-              {view === "week" ? getWeekLabel(weekDays) : `${MONTH_NAMES[currentMonth - 1]} ${currentYear}`}
-            </span>
-            <button onClick={next} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors">
-              <ChevronRight className="h-4 w-4" />
-            </button>
+            <button onClick={prev} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors"><ChevronLeft className="h-4 w-4"/></button>
+            <span className="px-3 text-sm font-semibold text-gray-800 dark:text-gray-200 min-w-[210px] text-center">{view==="week"?weekLabel(days):`${MONTH_NAMES[curMonth-1]} ${curYear}`}</span>
+            <button onClick={next} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors"><ChevronRight className="h-4 w-4"/></button>
           </div>
-          <button onClick={goToday} className="px-3 py-1.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-sm text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 transition-colors">
-            Aujourd'hui
-          </button>
+          <button onClick={goToday} className="px-3 py-1.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors shadow-sm">Aujourd'hui</button>
           <div className="flex rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-sm p-1 ml-auto">
-            <button
-              onClick={() => setView("week")}
-              className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", view === "week" ? "bg-blue-500 text-white shadow-sm" : "text-gray-500 hover:text-gray-700")}
-            >
-              <AlignJustify className="h-3.5 w-3.5" /> Semaine
-            </button>
-            <button
-              onClick={() => setView("month")}
-              className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", view === "month" ? "bg-blue-500 text-white shadow-sm" : "text-gray-500 hover:text-gray-700")}
-            >
-              <LayoutGrid className="h-3.5 w-3.5" /> Mois
-            </button>
+            <button onClick={()=>setView("week")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",view==="week"?"bg-blue-500 text-white shadow-sm":"text-gray-500 hover:text-gray-700")}><AlignJustify className="h-3.5 w-3.5"/> Semaine</button>
+            <button onClick={()=>setView("month")} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",view==="month"?"bg-blue-500 text-white shadow-sm":"text-gray-500 hover:text-gray-700")}><LayoutGrid className="h-3.5 w-3.5"/> Mois</button>
           </div>
         </div>
 
-        {/* ── Counters (week view only) ── */}
-        {view === "week" && (
+        {/* Counters */}
+        {view==="week"&&(
           <div className="flex gap-3 flex-wrap flex-shrink-0">
-            <EditableCounter
-              label="Places restantes ce mois"
-              value={monthAvailable}
-              sub={monthData ? `sur ${monthData.totalSlots} au total · cliquer pour modifier` : "Cliquer pour définir le total"}
-              color="blue"
-              onSave={saveMonthlyTotal}
-            />
-            <EditableCounter
-              label="Places disponibles cette semaine"
-              value={weekAvailable}
-              sub={`${weekPlacementsCount} planifié${weekPlacementsCount !== 1 ? "s" : ""} · limite : ${weeklyLimit} · cliquer pour modifier`}
-              color="green"
-              onSave={saveWeeklyLimit}
-            />
+            <EditableCounter label="Places restantes ce mois" value={monthAvailable} sub={monthData?`sur ${monthData.totalSlots} · cliquer`:"Cliquer pour définir"} color="blue" onSave={saveMonthlyTotal}/>
+            <EditableCounter label="Places cette semaine" value={Math.max(0,weeklyLimit-weekCount)} sub={`${weekCount} planifié${weekCount!==1?"s":""} · limite ${weeklyLimit} · cliquer`} color="green" onSave={saveWeeklyLimit}/>
           </div>
         )}
 
-        {/* ── Views ── */}
-        {loading ? (
+        {loading?(
           <div className="flex-1 flex items-center justify-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent"/>
           </div>
-        ) : view === "week" ? (
-          /* WEEK VIEW */
-          <div className="flex-1 bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 overflow-hidden flex flex-col min-h-0">
+        ):view==="week"?(
+
+          <div className="flex-1 bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col min-h-0">
             {/* Day headers */}
-            <div className="flex border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
-              <div className="w-14 flex-shrink-0" />
-              {weekDays.map((day, di) => {
-                const dKey = toKey(day);
-                const isToday = dKey === todayKey;
-                return (
-                  <div key={dKey} className="flex-1 min-w-0 flex flex-col items-center py-2 border-l border-gray-100 dark:border-gray-800">
-                    <span className={cn("text-[11px] font-semibold uppercase tracking-wider", isToday ? "text-blue-500" : "text-gray-400")}>
-                      {DAYS_SHORT[di]}
-                    </span>
-                    <span className={cn("mt-0.5 flex h-6 w-6 items-center justify-center rounded-full text-sm font-bold", isToday ? "bg-blue-500 text-white" : "text-gray-800 dark:text-gray-200")}>
-                      {day.getDate()}
-                    </span>
+            <div className="flex border-b-2 border-gray-200 dark:border-gray-700 bg-gray-50/50 flex-shrink-0">
+              <div className="w-14 flex-shrink-0 border-r border-gray-200 dark:border-gray-700"/>
+              {days.map((day,di)=>{
+                const dk=dateKey(day),isToday=dk===todayKey;
+                return(
+                  <div key={dk} className={cn("flex-1 min-w-0 flex flex-col items-center py-2.5 border-r border-gray-100 dark:border-gray-800 last:border-r-0",isToday&&"bg-blue-50/60")}>
+                    <span className={cn("text-[10px] font-bold uppercase tracking-widest",isToday?"text-blue-500":"text-gray-400")}>{DAYS_SHORT[di]}</span>
+                    <span className={cn("mt-1 flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold",isToday?"bg-blue-500 text-white shadow-sm":"text-gray-800 dark:text-gray-200")}>{day.getDate()}</span>
                   </div>
                 );
               })}
-              <div className="w-40 flex-shrink-0 border-l-2 border-gray-200 dark:border-gray-700 flex items-center justify-between px-3 py-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">File d'attente</span>
-                <button
-                  onClick={() => { setFormError(""); setModal("queue"); }}
-                  className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-white hover:bg-blue-600 transition-colors"
-                >
-                  <Plus className="h-3 w-3" />
-                </button>
+              <div className="w-44 flex-shrink-0 border-l-2 border-blue-100 dark:border-blue-900/50 bg-blue-50/30 flex items-center justify-between px-3 py-2.5">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-blue-500">File d'attente</span>
+                <button onClick={()=>{setFormError("");setModal("queue");}} className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-white hover:bg-blue-600 transition-colors shadow-sm"><Plus className="h-3 w-3"/></button>
               </div>
             </div>
 
             {/* Body */}
             <div className="flex flex-1 overflow-y-auto min-h-0">
-              {/* Time labels */}
-              <div className="w-14 flex-shrink-0 border-r border-gray-100 dark:border-gray-800">
-                {TIME_SLOTS.map(t => (
-                  <div key={t} className="h-14 flex items-center justify-center">
-                    <span className="text-[10px] text-gray-400">{t}</span>
+              <div className="w-14 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-gray-50/30">
+                {TIME_SLOTS.map(t=>(
+                  <div key={t} className="h-14 flex items-start justify-center pt-1.5 border-t border-gray-100 dark:border-gray-800">
+                    <span className="text-[10px] font-medium text-gray-400">{t}</span>
                   </div>
                 ))}
               </div>
 
-              {/* Day columns */}
-              {weekDays.map(day => {
-                const dKey = toKey(day);
-                return (
-                  <div key={dKey} className="flex-1 min-w-0 border-l border-gray-100 dark:border-gray-800">
-                    {TIME_SLOTS.map(time => {
-                      const slotKey = `${dKey}:${time}`;
-                      const slotPlacements = bySlot.get(slotKey) || [];
-                      const isTarget = dropTarget === slotKey && isDragging;
-                      return (
-                        <div
-                          key={time}
-                          className={cn(
-                            "h-14 border-t border-gray-50 dark:border-gray-800/50 relative transition-colors select-none",
-                            isTarget ? "bg-blue-50 dark:bg-blue-900/20" : isDragging ? "hover:bg-blue-50/50" : "hover:bg-gray-50 dark:hover:bg-gray-800/30 cursor-pointer"
-                          )}
-                          onClick={() => openFromSlot(dKey, time)}
-                          onDragOver={e => onSlotDragOver(e, slotKey)}
-                          onDragEnter={() => onSlotDragEnter(slotKey)}
-                          onDragLeave={() => onSlotDragLeave(slotKey)}
-                          onDrop={e => onSlotDrop(e, dKey, time)}
-                        >
-                          {isTarget && <div className="absolute inset-0 border-2 border-blue-400 rounded pointer-events-none z-10" />}
-                          {slotPlacements.map(p => (
-                            <div
-                              key={p.id}
-                              draggable
-                              onDragStart={e => { e.stopPropagation(); setDragInfo({ kind: "placement", placement: p }); }}
-                              onDragEnd={onDragEnd}
-                              onClick={e => { e.stopPropagation(); openDetail(p); }}
-                              className={cn(
-                                "absolute inset-x-0.5 top-0.5 bottom-0.5 flex items-center px-1.5 rounded-lg text-[10px] font-semibold text-white bg-gradient-to-r from-blue-500 to-blue-600 shadow-sm cursor-pointer select-none transition-opacity z-10",
-                                "hover:from-blue-600 hover:to-blue-700",
-                                dragInfo?.kind === "placement" && dragInfo.placement.id === p.id ? "opacity-40" : "opacity-100"
-                              )}
+              {days.map(day=>{
+                const dk=dateKey(day),isToday=dk===todayKey;
+                return(
+                  <div key={dk} className={cn("flex-1 min-w-0 border-r border-gray-100 dark:border-gray-800 last:border-r-0",isToday&&"bg-blue-50/20")}>
+                    {TIME_SLOTS.map(time=>{
+                      const slotId=`${dk}:${time}`, slotPlacements=bySlot.get(slotId)??[];
+                      return(
+                        <TimeSlot key={time} slotId={slotId} dateStr={dk} time={time}
+                          onTap={()=>openFromSlot(dk,time)} isOver={dropTarget===slotId}>
+                          {slotPlacements.map(p=>(
+                            <Draggable key={p.id}
+                              data={{kind:"placement",placement:p}}
+                              onTap={()=>openDetail(p)}
+                              cbs={dragCbs}
+                              className="absolute inset-x-0.5 top-0.5 bottom-0.5 flex items-center px-1.5 rounded-lg z-10 bg-gradient-to-br from-blue-500 to-blue-600 text-white text-[10px] font-semibold shadow-sm"
                             >
-                              <span className="truncate">{p.student.firstName ? `${p.student.firstName} ${p.student.lastName}` : p.student.lastName}</span>
-                            </div>
+                              <span className="truncate">{fullName(p.student)}</span>
+                            </Draggable>
                           ))}
-                        </div>
+                        </TimeSlot>
                       );
                     })}
                   </div>
                 );
               })}
 
-              {/* Queue column */}
-              <div className="w-40 flex-shrink-0 border-l-2 border-gray-200 dark:border-gray-700 overflow-y-auto p-2 space-y-1.5">
-                {students.length === 0 ? (
-                  <div className="h-32 flex flex-col items-center justify-center text-center p-4">
+              {/* Queue */}
+              <div className="w-44 flex-shrink-0 border-l-2 border-blue-100 dark:border-blue-900/50 bg-blue-50/20 overflow-y-auto p-2 space-y-1.5">
+                {students.length===0?(
+                  <div className="h-24 flex flex-col items-center justify-center text-center gap-1">
                     <p className="text-xs text-gray-400">Aucun élève</p>
-                    <button onClick={() => setModal("queue")} className="mt-2 text-xs text-blue-500 underline">Ajouter</button>
+                    <button onClick={()=>setModal("queue")} className="text-xs text-blue-500 underline">Ajouter</button>
                   </div>
-                ) : students.map(s => (
-                  <div
-                    key={s.id}
-                    draggable
-                    onDragStart={() => setDragInfo({ kind: "queue", student: s })}
-                    onDragEnd={onDragEnd}
-                    onClick={() => openFromQueue(s)}
-                    className={cn(
-                      "bg-gray-50 dark:bg-gray-800 rounded-xl p-2 cursor-grab active:cursor-grabbing select-none transition-all",
-                      "hover:bg-white dark:hover:bg-gray-700 hover:shadow-sm border border-transparent hover:border-gray-100 dark:hover:border-gray-600",
-                      dragInfo?.kind === "queue" && dragInfo.student.id === s.id ? "opacity-40 scale-95" : "opacity-100"
-                    )}
+                ):students.map(s=>(
+                  <Draggable key={s.id}
+                    data={{kind:"student",student:s}}
+                    onTap={()=>openFromQueue(s)}
+                    cbs={dragCbs}
+                    className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 flex items-center gap-2 px-2 py-1.5 select-none"
                   >
-                    <div className="flex items-center gap-1.5">
-                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 text-[10px] font-bold flex-shrink-0">
-                        {initials(s)}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-[11px] font-semibold text-gray-900 dark:text-gray-100 truncate">
-                          {s.firstName ? `${s.firstName} ${s.lastName}` : s.lastName}
-                        </p>
-                        <p className="text-[9px] text-gray-400 truncate">{s.drivingHours}h · {drivingDate(s.lastDrivingDate)}</p>
-                      </div>
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 text-[10px] font-bold flex-shrink-0">{initials(s)}</div>
+                    <div className="min-w-0 flex-1 leading-tight">
+                      <p className="text-[11px] font-semibold text-gray-900 dark:text-gray-100 truncate">{fullName(s)}</p>
+                      <p className="text-[9px] text-gray-400 truncate">{s.drivingHours}h · {drivingDate(s.lastDrivingDate)}</p>
                     </div>
-                  </div>
+                  </Draggable>
                 ))}
               </div>
             </div>
           </div>
-        ) : (
-          /* MONTH VIEW */
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 overflow-hidden">
-            <div className="grid grid-cols-7 border-b border-gray-100 dark:border-gray-800">
-              {DAYS_SHORT.map(d => (
-                <div key={d} className="py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-gray-400">{d}</div>
-              ))}
+
+        ):(
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div className="grid grid-cols-7 border-b-2 border-gray-200 dark:border-gray-700 bg-gray-50/50">
+              {DAYS_SHORT.map(d=><div key={d} className="py-2.5 text-center text-[10px] font-bold uppercase tracking-widest text-gray-400">{d}</div>)}
             </div>
             <div className="grid grid-cols-7">
-              {Array.from({ length: getFirstOffset(currentYear, currentMonth) }).map((_, i) => (
-                <div key={`e-${i}`} className="h-20 border-b border-r border-gray-50 dark:border-gray-800" />
-              ))}
-              {Array.from({ length: getDaysInMonth(currentYear, currentMonth) }).map((_, i) => {
-                const day = i + 1;
-                const dKey = `${currentYear}-${String(currentMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-                const dayPlacements = placements.filter(p => p.date.slice(0, 10) === dKey);
-                const isToday = dKey === todayKey;
-                return (
-                  <div
-                    key={day}
-                    onClick={() => {
-                      setView("week");
-                      setWeekStart(getWeekStart(new Date(currentYear, currentMonth - 1, day)));
-                    }}
-                    className="h-20 border-b border-r border-gray-50 dark:border-gray-800 p-1.5 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors"
-                  >
-                    <span className={cn("inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold", isToday ? "bg-blue-500 text-white" : "text-gray-700 dark:text-gray-300")}>
-                      {day}
-                    </span>
+              {Array.from({length:getFirstOffset(curYear,curMonth)}).map((_,i)=><div key={`e-${i}`} className="h-24 border-b border-r border-gray-50 dark:border-gray-800 bg-gray-50/30"/>)}
+              {Array.from({length:getDaysInMonth(curYear,curMonth)}).map((_,i)=>{
+                const day=i+1,dk=`${curYear}-${fmt2(curMonth)}-${fmt2(day)}`;
+                const dayPlacements=placements.filter(p=>p.date.slice(0,10)===dk),isToday=dk===todayKey;
+                return(
+                  <div key={day} onClick={()=>{setView("week");setWStart(weekStartOf(new Date(curYear,curMonth-1,day)));}}
+                    className={cn("h-24 border-b border-r border-gray-100 dark:border-gray-800 p-1.5 cursor-pointer hover:bg-blue-50/30 transition-colors",isToday&&"bg-blue-50/40")}>
+                    <span className={cn("inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold",isToday?"bg-blue-500 text-white":"text-gray-700 dark:text-gray-300")}>{day}</span>
                     <div className="mt-0.5 space-y-0.5">
-                      {dayPlacements.slice(0, 2).map(p => (
-                        <div key={p.id} onClick={e => { e.stopPropagation(); openDetail(p); }} className="text-[9px] font-semibold text-white bg-blue-500 rounded px-1 py-0.5 truncate">
-                          {p.time} {p.student.lastName}
-                        </div>
+                      {dayPlacements.slice(0,2).map(p=>(
+                        <div key={p.id} onClick={e=>{e.stopPropagation();openDetail(p);}} className="text-[9px] font-semibold text-white bg-blue-500 rounded px-1 py-0.5 truncate">{p.time} {p.student.lastName}</div>
                       ))}
-                      {dayPlacements.length > 2 && <div className="text-[9px] text-gray-400">+{dayPlacements.length - 2}</div>}
+                      {dayPlacements.length>2&&<div className="text-[9px] text-gray-400">+{dayPlacements.length-2}</div>}
                     </div>
                   </div>
                 );
@@ -637,92 +465,64 @@ export default function CalendrierPage() {
         )}
       </div>
 
-      {/* ── Add Placement Modal ── */}
-      <Modal open={modal === "add"} onClose={closeModal} title={queueStudent ? `Placer ${queueStudent.firstName ? `${queueStudent.firstName} ${queueStudent.lastName}` : queueStudent.lastName}` : "Placer un élève"}>
+      {/* ══ Modals ══ */}
+      <Modal open={modal==="add"} onClose={closeModal} title={queueStu?`Placer ${fullName(queueStu)}`:"Placer un élève"}>
         <form onSubmit={submitPlacement} className="space-y-4 mt-2">
-          {!queueStudent && (
-            <Select label="Élève *" value={pForm.studentId} onChange={e => setPForm(f => ({ ...f, studentId: e.target.value }))} required>
+          {!queueStu&&(
+            <Select label="Élève *" value={pForm.studentId} onChange={e=>setPForm(f=>({...f,studentId:e.target.value}))} required>
               <option value="">Sélectionner un élève</option>
-              {studentOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {studentOptions.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
             </Select>
           )}
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Date *" type="date" value={pForm.date} onChange={e => setPForm(f => ({ ...f, date: e.target.value }))} required />
-            <Select label="Heure *" value={pForm.time} onChange={e => setPForm(f => ({ ...f, time: e.target.value }))} required>
-              {TIME_SLOTS.map(t => <option key={t} value={t}>{t}</option>)}
+            <Input label="Date *" type="date" value={pForm.date} onChange={e=>setPForm(f=>({...f,date:e.target.value}))} required/>
+            <Select label="Heure *" value={pForm.time} onChange={e=>setPForm(f=>({...f,time:e.target.value}))} required>
+              {TIME_SLOTS.map(t=><option key={t} value={t}>{t}</option>)}
             </Select>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Moniteur" value={pForm.instructor} onChange={e => setPForm(f => ({ ...f, instructor: e.target.value }))} placeholder="Optionnel" />
-            <Input label="Centre d'examen" value={pForm.examCenter} onChange={e => setPForm(f => ({ ...f, examCenter: e.target.value }))} placeholder="Optionnel" />
+            <Input label="Moniteur" value={pForm.instructor} onChange={e=>setPForm(f=>({...f,instructor:e.target.value}))} placeholder="Optionnel"/>
+            <Input label="Centre d'examen" value={pForm.examCenter} onChange={e=>setPForm(f=>({...f,examCenter:e.target.value}))} placeholder="Optionnel"/>
           </div>
-          <Textarea label="Notes" value={pForm.notes} onChange={e => setPForm(f => ({ ...f, notes: e.target.value }))} rows={2} placeholder="Optionnel" />
-          {formError && <p className="text-sm text-red-500">{formError}</p>}
+          <Textarea label="Notes" value={pForm.notes} onChange={e=>setPForm(f=>({...f,notes:e.target.value}))} rows={2} placeholder="Optionnel"/>
+          {formError&&<p className="text-sm text-red-500">{formError}</p>}
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={closeModal} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">Annuler</button>
-            <button type="submit" disabled={formLoading} className="flex-1 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 disabled:opacity-50 transition-colors">{formLoading ? "Enregistrement..." : "Confirmer"}</button>
+            <button type="submit" disabled={formLoading} className="flex-1 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 disabled:opacity-50 transition-colors">{formLoading?"Enregistrement...":"Confirmer"}</button>
           </div>
         </form>
       </Modal>
 
-      {/* ── Detail Modal ── */}
-      <Modal open={modal === "detail"} onClose={closeModal} title="Détail du placement">
-        {selectedPlacement && (
+      <Modal open={modal==="detail"} onClose={closeModal} title="Détail du placement">
+        {selPlacement&&(
           <div className="space-y-3 mt-2">
             <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 space-y-2.5">
-              {[
-                ["Élève", `${selectedPlacement.student.firstName} ${selectedPlacement.student.lastName}`.trim()],
-                ["Date", new Date(selectedPlacement.date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })],
-                ["Heure", selectedPlacement.time],
-                ...(selectedPlacement.instructor ? [["Moniteur", selectedPlacement.instructor]] : []),
-                ...(selectedPlacement.examCenter ? [["Centre", selectedPlacement.examCenter]] : []),
-              ].map(([label, val]) => (
-                <div key={label} className="flex justify-between text-sm">
-                  <span className="text-gray-500">{label}</span>
-                  <span className="font-semibold text-gray-900 dark:text-gray-100 text-right max-w-[60%]">{val}</span>
-                </div>
+              {([["Élève",fullName(selPlacement.student)],["Date",new Date(selPlacement.date).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})],["Heure",selPlacement.time],...(selPlacement.instructor?[["Moniteur",selPlacement.instructor]]:[]),...(selPlacement.examCenter?[["Centre",selPlacement.examCenter]]:[]),] as [string,string][]).map(([label,val])=>(
+                <div key={label} className="flex justify-between text-sm"><span className="text-gray-500">{label}</span><span className="font-semibold text-gray-900 dark:text-gray-100 text-right">{val}</span></div>
               ))}
-              {selectedPlacement.notes && (
-                <div className="pt-2 border-t border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-400">{selectedPlacement.notes}</div>
-              )}
+              {selPlacement.notes&&<div className="pt-2 border-t border-gray-200 dark:border-gray-700 text-sm text-gray-500">{selPlacement.notes}</div>}
             </div>
-            <button
-              onClick={() => deletePlacement(selectedPlacement.id)}
-              disabled={formLoading}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 disabled:opacity-50 transition-colors"
-            >
-              <Trash2 className="h-4 w-4" />
-              {formLoading ? "Suppression..." : "Supprimer ce placement"}
+            <button onClick={()=>deletePlacement(selPlacement.id)} disabled={formLoading}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 disabled:opacity-50 transition-colors">
+              <Trash2 className="h-4 w-4"/>{formLoading?"Suppression...":"Supprimer ce placement"}
             </button>
           </div>
         )}
       </Modal>
 
-      {/* ── Queue Modal ── */}
-      <Modal open={modal === "queue"} onClose={closeModal} title="Ajouter à la file d'attente">
+      <Modal open={modal==="queue"} onClose={closeModal} title="Ajouter à la file d'attente">
         <div className="mt-3 space-y-3">
-          <button
-            onClick={() => setModal("newStudent")}
-            className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-dashed border-blue-200 hover:border-blue-400 hover:bg-blue-50 transition-colors text-left"
-          >
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600">
-              <Plus className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Nouvel élève</p>
-              <p className="text-xs text-gray-500">Créer et ajouter un nouvel élève</p>
-            </div>
+          <button onClick={()=>setModal("newStudent")} className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-dashed border-blue-200 hover:border-blue-400 hover:bg-blue-50 transition-colors text-left">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-500"><Plus className="h-5 w-5"/></div>
+            <div><p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Nouvel élève</p><p className="text-xs text-gray-500">Créer et ajouter un nouvel élève</p></div>
           </button>
-          {students.length > 0 && (
+          {students.length>0&&(
             <div className="space-y-1 max-h-64 overflow-y-auto">
-              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-1 mb-2">Élèves existants</p>
-              {students.map(s => (
-                <button key={s.id} onClick={() => openFromQueue(s)} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 text-xs font-bold flex-shrink-0">{initials(s)}</div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{s.firstName ? `${s.firstName} ${s.lastName}` : s.lastName}</p>
-                    <p className="text-xs text-gray-400">{s.drivingHours}h · {drivingDate(s.lastDrivingDate)}</p>
-                  </div>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1 mb-2">Élèves existants</p>
+              {students.map(s=>(
+                <button key={s.id} onClick={()=>openFromQueue(s)} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-50 text-blue-500 text-xs font-bold flex-shrink-0">{initials(s)}</div>
+                  <div className="min-w-0"><p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{fullName(s)}</p><p className="text-xs text-gray-400">{s.drivingHours}h · {drivingDate(s.lastDrivingDate)}</p></div>
                 </button>
               ))}
             </div>
@@ -730,28 +530,29 @@ export default function CalendrierPage() {
         </div>
       </Modal>
 
-      {/* ── New Student Modal ── */}
-      <Modal open={modal === "newStudent"} onClose={closeModal} title="Nouvel élève">
+      <Modal open={modal==="newStudent"} onClose={closeModal} title="Nouvel élève">
         <form onSubmit={submitStudent} className="space-y-3 mt-2">
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Prénom" placeholder="Jean" value={sForm.firstName} onChange={e => setSForm(f => ({ ...f, firstName: e.target.value }))} />
-            <Input label="Nom *" placeholder="Dupont" value={sForm.lastName} onChange={e => setSForm(f => ({ ...f, lastName: e.target.value }))} required />
+            <Input label="Prénom" placeholder="Jean" value={sForm.firstName} onChange={e=>setSForm(f=>({...f,firstName:e.target.value}))}/>
+            <Input label="Nom *" placeholder="Dupont" value={sForm.lastName} onChange={e=>setSForm(f=>({...f,lastName:e.target.value}))} required/>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Email" type="email" value={sForm.email} onChange={e => setSForm(f => ({ ...f, email: e.target.value }))} placeholder="Optionnel" />
-            <Input label="Téléphone" type="tel" value={sForm.phone} onChange={e => setSForm(f => ({ ...f, phone: e.target.value }))} placeholder="Optionnel" />
+            <Input label="Email" type="email" value={sForm.email} onChange={e=>setSForm(f=>({...f,email:e.target.value}))} placeholder="Optionnel"/>
+            <Input label="Téléphone" type="tel" value={sForm.phone} onChange={e=>setSForm(f=>({...f,phone:e.target.value}))} placeholder="Optionnel"/>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Heures de conduite" type="number" min="0" step="0.5" value={sForm.drivingHours} onChange={e => setSForm(f => ({ ...f, drivingHours: e.target.value }))} />
-            <Input label="Dernière heure de conduite" type="date" value={sForm.lastDrivingDate} onChange={e => setSForm(f => ({ ...f, lastDrivingDate: e.target.value }))} />
+            <Input label="Heures de conduite" type="number" min="0" step="0.5" value={sForm.drivingHours} onChange={e=>setSForm(f=>({...f,drivingHours:e.target.value}))}/>
+            <Input label="Dernière heure de conduite" type="date" value={sForm.lastDrivingDate} onChange={e=>setSForm(f=>({...f,lastDrivingDate:e.target.value}))}/>
           </div>
-          {formError && <p className="text-sm text-red-500">{formError}</p>}
+          {formError&&<p className="text-sm text-red-500">{formError}</p>}
           <div className="flex gap-3 pt-1">
-            <button type="button" onClick={() => setModal("queue")} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">Retour</button>
-            <button type="submit" disabled={formLoading} className="flex-1 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 disabled:opacity-50 transition-colors">{formLoading ? "Création..." : "Créer l'élève"}</button>
+            <button type="button" onClick={()=>setModal("queue")} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">Retour</button>
+            <button type="submit" disabled={formLoading} className="flex-1 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 disabled:opacity-50 transition-colors">{formLoading?"Création...":"Créer l'élève"}</button>
           </div>
         </form>
       </Modal>
+
+      <DebugPanel />
     </AppLayout>
   );
 }
