@@ -269,8 +269,13 @@ export default function CalendrierPage() {
     setDropTarget(null);
     if (!t) return;
     if (d.kind === "student") {
-      setPForm({studentId:d.student.id, date:t.date, time:t.time, instructor:"", examCenter:"", notes:""});
-      setQueueStu(null); setFormError(""); setModal("add");
+      // Optimistic update
+      const tempId = `temp-${Date.now()}`;
+      const newP: Placement = { id: tempId, date: t.date, time: t.time, instructor: "", examCenter: "", notes: "", student: d.student };
+      setPlacements(prev => [...prev, newP]);
+      fetch("/api/placements", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ studentId: d.student.id, date: t.date, time: t.time, instructor: "", examCenter: "", notes: "" }) })
+        .then(r => r.json()).then(saved => { if (saved?.id) setPlacements(prev => prev.map(x => x.id === tempId ? saved : x)); else fetchData(); })
+        .catch(() => { setPlacements(prev => prev.filter(x => x.id !== tempId)); });
     } else {
       const p = d.placement;
       if (p.date.slice(0,10) !== t.date || p.time !== t.time) {
