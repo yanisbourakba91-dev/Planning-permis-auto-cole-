@@ -334,7 +334,7 @@ export default function CalendrierPage() {
   const bySlot = new Map<string,Placement[]>();
   placements.forEach(p=>{const k=`${p.date.slice(0,10)}:${p.time}`;bySlot.set(k,[...(bySlot.get(k)??[]),p]);});
   const placedIds = new Set(placements.map(p=>p.student.id));
-  const queueStudents = students.filter(s=>!placedIds.has(s.id));
+  const queueStudents = students;
   const studentOptions = students.map(s=>({value:s.id,label:fullName(s)}));
 
   return (
@@ -433,23 +433,31 @@ export default function CalendrierPage() {
                 <div data-queue="1" className={cn("w-44 flex-shrink-0 border-l-2 p-2 space-y-1.5 transition-colors", dropTarget==="queue" ? "border-blue-400 bg-blue-100 dark:bg-blue-900/40" : "border-blue-100 dark:border-blue-900/50 bg-blue-50/20 dark:bg-blue-900/10")}>
                   {queueStudents.length===0?(
                     <div className="h-24 flex flex-col items-center justify-center text-center gap-1">
-                      <p className="text-xs text-gray-400">{students.length===0?"Aucun élève":"Tous placés ✓"}</p>
+                      <p className="text-xs text-gray-400">Aucun élève</p>
                       <button onClick={()=>setModal("queue")} className="text-xs text-blue-500 underline">Ajouter</button>
                     </div>
-                  ):queueStudents.map(s=>(
+                  ):queueStudents.map(s=>{
+                    const isPlaced = placedIds.has(s.id);
+                    return (
                     <Draggable key={s.id}
                       data={{kind:"student",student:s}}
                       onTap={()=>openFromQueue(s)}
                       cbs={dragCbs}
-                      className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 flex items-center gap-2 px-2 py-1.5 select-none"
+                      className={cn("rounded-xl border flex items-center gap-2 px-2 py-1.5 select-none transition-opacity",
+                        isPlaced
+                          ? "bg-gray-50 dark:bg-gray-800/40 border-gray-100 dark:border-gray-700/50 opacity-50"
+                          : "bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700"
+                      )}
                     >
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 text-[10px] font-bold flex-shrink-0">{initials(s)}</div>
+                      <div className={cn("flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold flex-shrink-0",
+                        isPlaced ? "bg-gray-200 dark:bg-gray-700 text-gray-400" : "bg-blue-100 dark:bg-blue-900/40 text-blue-600"
+                      )}>{initials(s)}</div>
                       <div className="min-w-0 flex-1 leading-tight">
-                        <p className="text-[11px] font-semibold text-gray-900 dark:text-gray-100 truncate">{fullName(s)}</p>
+                        <p className={cn("text-[11px] font-semibold truncate", isPlaced ? "line-through text-gray-400 dark:text-gray-500" : "text-gray-900 dark:text-gray-100")}>{fullName(s)}</p>
                         <p className="text-[9px] text-gray-400 truncate">{s.drivingHours}h · {drivingDate(s.lastDrivingDate)}</p>
                       </div>
                     </Draggable>
-                  ))}
+                  );})}
                 </div>
               </div>
 
