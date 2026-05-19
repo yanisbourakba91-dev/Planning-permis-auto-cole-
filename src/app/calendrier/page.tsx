@@ -22,6 +22,7 @@ interface Placement {
 interface Student {
   id: string; firstName: string; lastName: string;
   drivingHours: number; lastDrivingDate: string | null;
+  licenseType: string;
 }
 interface ExamMonthData { year: number; month: number; totalSlots: number; usedSlots: number; }
 type DragData = { kind: "student"; student: Student } | { kind: "placement"; placement: Placement };
@@ -31,6 +32,39 @@ const DAYS_SHORT = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
 const MONTH_NAMES = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
 const CACHE_MS = 5 * 60_000; // 5 min TTL
 interface CachedWeek { placements:Placement[]; queue:{id:string;studentId:string}[]; monthData:ExamMonthData|null; ts:number; }
+
+const LICENSE_TYPES = ["Permis B","Permis BEA","VP Permis B","VP Permis BEA","Permis Accéléré"] as const;
+
+function licenseCardCls(t: string, isPlaced: boolean) {
+  if (isPlaced) return "bg-gray-50 dark:bg-gray-800/40 border-gray-100 dark:border-gray-700/50 opacity-50";
+  switch(t) {
+    case "Permis B":        return "bg-gray-900 border-gray-700";
+    case "Permis BEA":      return "bg-green-50 border-green-300 dark:bg-green-900/20 dark:border-green-700";
+    case "VP Permis B":     return "bg-red-50 border-red-300 dark:bg-red-900/20 dark:border-red-700";
+    case "VP Permis BEA":   return "bg-white dark:bg-gray-800 border-green-400 border-l-red-400";
+    case "Permis Accéléré": return "bg-blue-50 border-blue-300 dark:bg-blue-900/20 dark:border-blue-700";
+    default:                return "bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700";
+  }
+}
+function licenseAvatarCls(t: string, isPlaced: boolean) {
+  if (isPlaced) return "bg-gray-200 dark:bg-gray-700 text-gray-400";
+  switch(t) {
+    case "Permis B":        return "bg-gray-700 text-white";
+    case "Permis BEA":      return "bg-green-100 dark:bg-green-900/40 text-green-700";
+    case "VP Permis B":     return "bg-red-100 dark:bg-red-900/40 text-red-600";
+    case "VP Permis BEA":   return "bg-gradient-to-br from-red-100 to-green-100 text-gray-700";
+    case "Permis Accéléré": return "bg-blue-100 dark:bg-blue-900/40 text-blue-600";
+    default:                return "bg-blue-100 dark:bg-blue-900/40 text-blue-600";
+  }
+}
+function licenseNameCls(t: string, isPlaced: boolean) {
+  if (isPlaced) return "line-through text-gray-400 dark:text-gray-500";
+  return t === "Permis B" ? "text-white" : "text-gray-900 dark:text-gray-100";
+}
+function licenseSubCls(t: string, isPlaced: boolean) {
+  if (isPlaced) return "text-gray-400";
+  return t === "Permis B" ? "text-gray-400" : "text-gray-400";
+}
 
 function weekStartOf(d: Date): Date {
   const r = new Date(d); const day = r.getDay();
@@ -231,7 +265,7 @@ export default function CalendrierPage() {
   const [selPlacement, setSelPlacement] = useState<Placement|null>(null);
   const [queueStu,     setQueueStu]     = useState<Student|null>(null);
   const [pForm,        setPForm]        = useState({studentId:"",date:"",time:"09:00",instructor:"",examCenter:"",notes:""});
-  const [sForm,        setSForm]        = useState({firstName:"",lastName:"",email:"",phone:"",drivingHours:"0",lastDrivingDate:""});
+  const [sForm,        setSForm]        = useState({firstName:"",lastName:"",email:"",phone:"",licenseType:"Permis B",lastDrivingDate:""});
   const [formError,    setFormError]    = useState("");
   const [formLoading,  setFormLoading]  = useState(false);
 
@@ -396,14 +430,14 @@ export default function CalendrierPage() {
     if(!sForm.lastName.trim()){setFormError("Le nom est requis");return;}
     setFormLoading(true);setFormError("");
     try{
-      const res=await fetch("/api/eleves",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...sForm,drivingHours:parseFloat(sForm.drivingHours)||0,lastDrivingDate:sForm.lastDrivingDate||null,email:sForm.email||undefined})});
+      const res=await fetch("/api/eleves",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...sForm,drivingHours:0,lastDrivingDate:sForm.lastDrivingDate||null,email:sForm.email||undefined})});
       const data=await res.json(); if(!res.ok){setFormError(data.error||"Erreur");return;}
       const qRes=await fetch("/api/queue",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({studentId:data.id,weekStart:dateKey(wStart)})});
       const qEntry=await qRes.json();
       setStudents(prev=>[...prev,data]);
       if(qEntry?.id) setWeekQueue(prev=>[...prev,qEntry]);
       if(cacheRef.current.students) cacheRef.current.students=[...cacheRef.current.students,data];
-      closeModal();setSForm({firstName:"",lastName:"",email:"",phone:"",drivingHours:"0",lastDrivingDate:""});
+      closeModal();setSForm({firstName:"",lastName:"",email:"",phone:"",licenseType:"Permis B",lastDrivingDate:""});
     }catch{setFormError("Erreur serveur");}finally{setFormLoading(false);}
   }
   async function deletePlacement(id:string){
@@ -546,17 +580,15 @@ export default function CalendrierPage() {
                       onTap={()=>openFromQueue(s)}
                       cbs={dragCbs}
                       className={cn("rounded-xl border flex items-center gap-2 px-2 py-1.5 select-none transition-opacity",
-                        isPlaced
-                          ? "bg-gray-50 dark:bg-gray-800/40 border-gray-100 dark:border-gray-700/50 opacity-50"
-                          : "bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700"
+                        licenseCardCls(s.licenseType??"Permis B", isPlaced)
                       )}
                     >
                       <div className={cn("flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold flex-shrink-0",
-                        isPlaced ? "bg-gray-200 dark:bg-gray-700 text-gray-400" : "bg-blue-100 dark:bg-blue-900/40 text-blue-600"
+                        licenseAvatarCls(s.licenseType??"Permis B", isPlaced)
                       )}>{initials(s)}</div>
                       <div className="min-w-0 flex-1 leading-tight">
-                        <p className={cn("text-[11px] font-semibold truncate", isPlaced ? "line-through text-gray-400 dark:text-gray-500" : "text-gray-900 dark:text-gray-100")}>{fullName(s)}</p>
-                        <p className="text-[9px] text-gray-400 truncate">{s.drivingHours}h · {drivingDate(s.lastDrivingDate)}</p>
+                        <p className={cn("text-[11px] font-semibold truncate", licenseNameCls(s.licenseType??"Permis B", isPlaced))}>{fullName(s)}</p>
+                        <p className={cn("text-[9px] truncate", licenseSubCls(s.licenseType??"Permis B", isPlaced))}>{s.licenseType??"Permis B"} · {drivingDate(s.lastDrivingDate)}</p>
                       </div>
                     </Draggable>
                   );})}
@@ -653,7 +685,7 @@ export default function CalendrierPage() {
                 return (
                 <button key={s.id} onClick={()=>!already&&addToWeekQueue(s)} disabled={already} className={cn("w-full flex items-center gap-3 p-3 rounded-xl transition-colors text-left",already?"opacity-40 cursor-default":"hover:bg-gray-50 dark:hover:bg-gray-800")}>
                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-50 text-blue-500 text-xs font-bold flex-shrink-0">{initials(s)}</div>
-                  <div className="min-w-0"><p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{fullName(s)}</p><p className="text-xs text-gray-400">{already?"Déjà dans la file":s.drivingHours+"h · "+drivingDate(s.lastDrivingDate)}</p></div>
+                  <div className="min-w-0"><p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{fullName(s)}</p><p className="text-xs text-gray-400">{already?"Déjà dans la file":(s.licenseType??"Permis B")+" · "+drivingDate(s.lastDrivingDate)}</p></div>
                 </button>
               );})}
             </div>
@@ -665,7 +697,9 @@ export default function CalendrierPage() {
         <form onSubmit={submitStudent} className="space-y-3 mt-2">
           <Input label="Nom et prénom *" placeholder="Jean Dupont" value={sForm.lastName} onChange={e=>setSForm(f=>({...f,lastName:e.target.value,firstName:""}))} required/>
           <Input label="Dernière date de conduite" type="date" value={sForm.lastDrivingDate} onChange={e=>setSForm(f=>({...f,lastDrivingDate:e.target.value}))}/>
-          <Input label="Heures de conduite" type="number" min="0" step="0.5" value={sForm.drivingHours} onChange={e=>setSForm(f=>({...f,drivingHours:e.target.value}))} placeholder="0"/>
+          <Select label="Type de permis" value={sForm.licenseType} onChange={e=>setSForm(f=>({...f,licenseType:e.target.value}))}>
+            {LICENSE_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+          </Select>
           {formError&&<p className="text-sm text-red-500">{formError}</p>}
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={()=>setModal("queue")} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">Retour</button>
