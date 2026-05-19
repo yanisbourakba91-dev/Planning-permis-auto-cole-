@@ -262,10 +262,16 @@ export default function CalendrierPage() {
 
   /* ── Drag callbacks (updated each render) ── */
   dragCbs.current.onStart  = () => {};
-  dragCbs.current.onOver   = (t) => { setDropTarget(t ? `${t.date}:${t.time}` : null); };
+  dragCbs.current.onOver   = (t) => { setDropTarget(t ? (t.isQueue ? "queue" : `${t.date}:${t.time}`) : null); };
   dragCbs.current.onDrop   = (t, d) => {
     setDropTarget(null);
     if (!t) return;
+    if (t.isQueue && d.kind === "placement") {
+      const p = d.placement;
+      setPlacements(prev => prev.filter(x => x.id !== p.id));
+      fetch(`/api/placements/${p.id}`, { method: "DELETE" }).catch(() => { fetchData(); });
+      return;
+    }
     if (d.kind === "student") {
       // Optimistic update
       const tempId = `temp-${Date.now()}`;
@@ -424,7 +430,7 @@ export default function CalendrierPage() {
                 })}
 
                 {/* Queue */}
-                <div className="w-44 flex-shrink-0 border-l-2 border-blue-100 dark:border-blue-900/50 bg-blue-50/20 dark:bg-blue-900/10 p-2 space-y-1.5">
+                <div data-queue="1" className={cn("w-44 flex-shrink-0 border-l-2 p-2 space-y-1.5 transition-colors", dropTarget==="queue" ? "border-blue-400 bg-blue-100 dark:bg-blue-900/40" : "border-blue-100 dark:border-blue-900/50 bg-blue-50/20 dark:bg-blue-900/10")}>
                   {queueStudents.length===0?(
                     <div className="h-24 flex flex-col items-center justify-center text-center gap-1">
                       <p className="text-xs text-gray-400">{students.length===0?"Aucun élève":"Tous placés ✓"}</p>

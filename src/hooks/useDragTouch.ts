@@ -16,6 +16,7 @@ import { RefObject, useEffect, useRef } from "react";
 export interface SlotTarget {
   date: string; // "YYYY-MM-DD"
   time: string; // "HH:MM"
+  isQueue?: boolean;
 }
 
 interface Options {
@@ -106,6 +107,7 @@ export function useDragTouch(
       if (clone) clone.style.visibility = "hidden";
       const hit = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
       if (clone) clone.style.visibility = "";
+      if (hit?.closest("[data-queue]")) return { date: "", time: "", isQueue: true };
       const slot = hit?.closest<HTMLElement>("[data-slot]");
       if (!slot?.dataset.date || !slot?.dataset.time) return null;
       return { date: slot.dataset.date, time: slot.dataset.time };
