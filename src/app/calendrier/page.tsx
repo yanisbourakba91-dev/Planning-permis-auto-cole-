@@ -465,11 +465,11 @@ export default function CalendrierPage() {
 
             {/* Flèches de navigation intégrées */}
             <button onClick={()=>navigateWithAnim("prev")}
-              className="absolute left-16 top-1/2 -translate-y-1/2 z-30 h-9 w-9 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm shadow-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-400 hover:text-blue-500 hover:border-blue-300 active:scale-90 transition-all">
+              className="absolute left-16 top-1/2 -translate-y-1/2 z-30 h-9 w-9 rounded-full bg-white/40 dark:bg-gray-800/40 backdrop-blur-sm shadow-sm border border-gray-200/50 dark:border-gray-700/50 flex items-center justify-center text-gray-300 dark:text-gray-600 hover:bg-white/90 dark:hover:bg-gray-800/90 hover:text-blue-500 hover:border-blue-300 hover:shadow-lg active:scale-90 transition-all">
               <ChevronLeft className="h-4 w-4"/>
             </button>
             <button onClick={()=>navigateWithAnim("next")}
-              className="absolute right-[11.75rem] top-1/2 -translate-y-1/2 z-30 h-9 w-9 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm shadow-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-400 hover:text-blue-500 hover:border-blue-300 active:scale-90 transition-all">
+              className="absolute right-[11.75rem] top-1/2 -translate-y-1/2 z-30 h-9 w-9 rounded-full bg-white/40 dark:bg-gray-800/40 backdrop-blur-sm shadow-sm border border-gray-200/50 dark:border-gray-700/50 flex items-center justify-center text-gray-300 dark:text-gray-600 hover:bg-white/90 dark:hover:bg-gray-800/90 hover:text-blue-500 hover:border-blue-300 hover:shadow-lg active:scale-90 transition-all">
               <ChevronRight className="h-4 w-4"/>
             </button>
 
