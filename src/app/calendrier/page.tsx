@@ -204,6 +204,7 @@ export default function CalendrierPage() {
 
   const [placements, setPlacements] = useState<Placement[]>([]);
   const [students,   setStudents]   = useState<Student[]>([]);
+  const [weekQueue,  setWeekQueue]  = useState<{id:string;studentId:string}[]>([]);
   const [monthData,  setMonthData]  = useState<ExamMonthData|null>(null);
   const [loading,    setLoading]    = useState(true);
 
@@ -242,13 +243,15 @@ export default function CalendrierPage() {
       const placeFetches = view==="week"
         ? uniqMonths.map(({year,month})=>fetch(`/api/placements?year=${year}&month=${month}`).then(r=>r.json()))
         : [fetch(`/api/placements?year=${curYear}&month=${curMonth}`).then(r=>r.json())];
-      const [stuData, allMonths, ...pArrays] = await Promise.all([
+      const [stuData, allMonths, queueData, ...pArrays] = await Promise.all([
         fetch("/api/eleves").then(r=>r.json()),
         fetch(`/api/places-examen?year=${ay}`).then(r=>r.json()),
+        view==="week"?fetch(`/api/queue?weekStart=${dateKey(wStart)}`).then(r=>r.json()):Promise.resolve([]),
         ...placeFetches,
       ]);
       const all=(pArrays.flat() as unknown[]).filter((p):p is Placement=>!!p&&typeof p==="object"&&"id"in(p as object));
       setPlacements(all); setStudents(Array.isArray(stuData)?stuData:[]);
+      setWeekQueue(Array.isArray(queueData)?queueData:[]);
       setMonthData(Array.isArray(allMonths)?(allMonths as ExamMonthData[]).find(m=>m.month===am&&m.year===ay)??null:null);
     } catch{/*silent*/} finally{setLoading(false);}
   },[wStart,curYear,curMonth,view]);
@@ -301,6 +304,17 @@ export default function CalendrierPage() {
   function openDetail(p:Placement){setSelPlacement(p);setModal("detail");}
   function closeModal(){setModal(null);setSelPlacement(null);setQueueStu(null);setFormError("");}
 
+  async function addToWeekQueue(s:Student){
+    const ws=dateKey(wStart);
+    const tempId=`temp-${Date.now()}`;
+    setWeekQueue(prev=>[...prev,{id:tempId,studentId:s.id}]);
+    closeModal();
+    const res=await fetch("/api/queue",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({studentId:s.id,weekStart:ws})});
+    const data=await res.json();
+    if(data?.id) setWeekQueue(prev=>prev.map(e=>e.id===tempId?data:e));
+    else setWeekQueue(prev=>prev.filter(e=>e.id!==tempId));
+  }
+
   async function submitPlacement(e:React.FormEvent){
     e.preventDefault();
     if(!pForm.studentId||!pForm.date||!pForm.time){setFormError("Élève, date et heure requis");return;}
@@ -318,6 +332,7 @@ export default function CalendrierPage() {
     try{
       const res=await fetch("/api/eleves",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...sForm,drivingHours:parseFloat(sForm.drivingHours)||0,lastDrivingDate:sForm.lastDrivingDate||null,email:sForm.email||undefined})});
       const data=await res.json(); if(!res.ok){setFormError(data.error||"Erreur");return;}
+      await fetch("/api/queue",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({studentId:data.id,weekStart:dateKey(wStart)})});
       closeModal();setSForm({firstName:"",lastName:"",email:"",phone:"",drivingHours:"0",lastDrivingDate:""});fetchData();
     }catch{setFormError("Erreur serveur");}finally{setFormLoading(false);}
   }
@@ -334,7 +349,8 @@ export default function CalendrierPage() {
   const bySlot = new Map<string,Placement[]>();
   placements.forEach(p=>{const k=`${p.date.slice(0,10)}:${p.time}`;bySlot.set(k,[...(bySlot.get(k)??[]),p]);});
   const placedIds = new Set(placements.map(p=>p.student.id));
-  const queueStudents = students;
+  const queueIds = new Set(weekQueue.map(e=>e.studentId));
+  const queueStudents = students.filter(s=>queueIds.has(s.id));
   const studentOptions = students.map(s=>({value:s.id,label:fullName(s)}));
 
   return (
@@ -546,12 +562,14 @@ export default function CalendrierPage() {
           {students.length>0&&(
             <div className="space-y-1 max-h-64 overflow-y-auto">
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1 mb-2">Élèves existants</p>
-              {students.map(s=>(
-                <button key={s.id} onClick={()=>openFromQueue(s)} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left">
+              {students.map(s=>{
+                const already=queueIds.has(s.id);
+                return (
+                <button key={s.id} onClick={()=>!already&&addToWeekQueue(s)} disabled={already} className={cn("w-full flex items-center gap-3 p-3 rounded-xl transition-colors text-left",already?"opacity-40 cursor-default":"hover:bg-gray-50 dark:hover:bg-gray-800")}>
                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-50 text-blue-500 text-xs font-bold flex-shrink-0">{initials(s)}</div>
-                  <div className="min-w-0"><p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{fullName(s)}</p><p className="text-xs text-gray-400">{s.drivingHours}h · {drivingDate(s.lastDrivingDate)}</p></div>
+                  <div className="min-w-0"><p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{fullName(s)}</p><p className="text-xs text-gray-400">{already?"Déjà dans la file":s.drivingHours+"h · "+drivingDate(s.lastDrivingDate)}</p></div>
                 </button>
-              ))}
+              );})}
             </div>
           )}
         </div>
