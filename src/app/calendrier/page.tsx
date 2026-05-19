@@ -344,9 +344,21 @@ export default function CalendrierPage() {
   };
   dragCbs.current.onCancel = () => { setDropTarget(null); };
 
+  const [slideClass, setSlideClass] = useState("");
+
   function prev(){if(view==="week"){setWStart(s=>shiftWeek(s,-1));return;}if(curMonth===1){setCurMonth(12);setCurYear(y=>y-1);}else setCurMonth(m=>m-1);}
   function next(){if(view==="week"){setWStart(s=>shiftWeek(s,1));return;}if(curMonth===12){setCurMonth(1);setCurYear(y=>y+1);}else setCurMonth(m=>m+1);}
   function goToday(){setWStart(weekStartOf(now));setCurYear(now.getFullYear());setCurMonth(now.getMonth()+1);}
+
+  function navigateWithAnim(dir: "prev"|"next") {
+    if (view !== "week") { dir==="prev"?prev():next(); return; }
+    const outCls = dir==="next" ? "animate-slide-out-left" : "animate-slide-out-right";
+    const inCls  = dir==="next" ? "animate-slide-in-right" : "animate-slide-in-left";
+    setSlideClass(outCls);
+    setTimeout(() => { dir==="prev"?prev():next(); setSlideClass(inCls);
+      setTimeout(() => setSlideClass(""), 200);
+    }, 155);
+  }
 
   function openFromSlot(d:string,t:string){setQueueStu(null);setPForm({studentId:"",date:d,time:t,instructor:"",examCenter:"",notes:""});setFormError("");setModal("add");}
   function openFromQueue(s:Student){setQueueStu(s);setPForm({studentId:s.id,date:"",time:"09:00",instructor:"",examCenter:"",notes:""});setFormError("");setModal("add");}
@@ -424,9 +436,9 @@ export default function CalendrierPage() {
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
           <div className="flex items-center gap-1 bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 p-1">
-            <button onClick={prev} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors"><ChevronLeft className="h-4 w-4"/></button>
+            <button onClick={()=>navigateWithAnim("prev")} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors"><ChevronLeft className="h-4 w-4"/></button>
             <span className="px-3 text-sm font-semibold text-gray-800 dark:text-gray-200 min-w-[210px] text-center">{view==="week"?weekLabel(days):`${MONTH_NAMES[curMonth-1]} ${curYear}`}</span>
-            <button onClick={next} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors"><ChevronRight className="h-4 w-4"/></button>
+            <button onClick={()=>navigateWithAnim("next")} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors"><ChevronRight className="h-4 w-4"/></button>
           </div>
           <button onClick={goToday} className="px-3 py-1.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 transition-colors shadow-sm">Aujourd'hui</button>
           <div className="flex items-center gap-2 ml-auto">
@@ -449,9 +461,20 @@ export default function CalendrierPage() {
           </div>
         ):view==="week"?(
 
-          <div className="flex-1 bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden min-h-0">
+          <div className="flex-1 bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden min-h-0 relative">
+
+            {/* Flèches de navigation intégrées */}
+            <button onClick={()=>navigateWithAnim("prev")}
+              className="absolute left-16 top-1/2 -translate-y-1/2 z-30 h-9 w-9 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm shadow-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-400 hover:text-blue-500 hover:border-blue-300 active:scale-90 transition-all">
+              <ChevronLeft className="h-4 w-4"/>
+            </button>
+            <button onClick={()=>navigateWithAnim("next")}
+              className="absolute right-[11.75rem] top-1/2 -translate-y-1/2 z-30 h-9 w-9 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm shadow-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-400 hover:text-blue-500 hover:border-blue-300 active:scale-90 transition-all">
+              <ChevronRight className="h-4 w-4"/>
+            </button>
+
             {/* Single scrollable container — évite le décalage scrollbar header/body */}
-            <div className="h-full overflow-y-auto">
+            <div className={cn("h-full overflow-y-auto", slideClass)}>
 
               {/* Day headers — sticky */}
               <div className="flex border-b-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 sticky top-0 z-20">
