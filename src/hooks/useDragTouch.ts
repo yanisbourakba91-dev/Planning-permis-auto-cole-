@@ -224,10 +224,16 @@ export function useDragTouch(
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup",   onMouseUp);
       if (!clone) return;
-      const slot = findSlot(e.clientX, e.clientY);
+      const dx = Math.abs(e.clientX - startX);
+      const dy = Math.abs(e.clientY - startY);
       removeClone();
       opts.current.onDragOver?.(null);
-      opts.current.onDrop(slot);
+      if (dx < 6 && dy < 6) {
+        // Simple clic sans mouvement → tap
+        opts.current.onTap();
+      } else {
+        opts.current.onDrop(findSlot(e.clientX, e.clientY));
+      }
     }
 
     function onMouseDown(e: MouseEvent) {

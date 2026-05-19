@@ -410,7 +410,8 @@ export default function CalendrierPage() {
   function closeModal(){setModal(null);setSelPlacement(null);setQueueStu(null);setEditStu(null);setFormError("");}
   function openEditStudent(s:Student){
     setEditStu(s);
-    const d=s.lastDrivingDate?new Date(s.lastDrivingDate).toISOString().slice(0,10):"";
+    let d="";
+    try { if(s.lastDrivingDate){const p=new Date(s.lastDrivingDate);if(!isNaN(p.getTime()))d=p.toISOString().slice(0,10);} } catch{/**/}
     setEForm({lastName:fullName(s),licenseType:s.licenseType??"Permis B",lastDrivingDate:d,sousMandat:s.sousMandat??false});
     setFormError("");setModal("editStudent");
   }
