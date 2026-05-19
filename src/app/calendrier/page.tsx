@@ -36,33 +36,38 @@ interface CachedWeek { placements:Placement[]; queue:{id:string;studentId:string
 const LICENSE_TYPES = ["Permis B","Permis BEA","VP Permis B","VP Permis BEA","Permis Accéléré"] as const;
 
 function licenseCardCls(t: string, isPlaced: boolean) {
-  if (isPlaced) return "bg-gray-50 dark:bg-gray-800/40 border-gray-100 dark:border-gray-700/50 opacity-50";
   switch(t) {
-    case "Permis B":        return "bg-gray-900 border-gray-700";
-    case "Permis BEA":      return "bg-green-50 border-green-300 dark:bg-green-900/20 dark:border-green-700";
-    case "VP Permis B":     return "bg-red-50 border-red-300 dark:bg-red-900/20 dark:border-red-700";
-    case "VP Permis BEA":   return "bg-white dark:bg-gray-800 border-green-400 border-l-red-400";
-    case "Permis Accéléré": return "bg-blue-50 border-blue-300 dark:bg-blue-900/20 dark:border-blue-700";
-    default:                return "bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700";
+    case "Permis B":        return isPlaced ? "bg-gray-900/30 border-gray-700/30 opacity-50" : "bg-gray-900 border-gray-700";
+    case "Permis BEA":      return isPlaced ? "bg-green-50/60 border-green-200/50 opacity-50 dark:bg-green-900/10 dark:border-green-800/30" : "bg-green-50 border-green-300 dark:bg-green-900/20 dark:border-green-700";
+    case "VP Permis B":     return isPlaced ? "bg-red-50/60 border-red-200/50 opacity-50 dark:bg-red-900/10 dark:border-red-800/30" : "bg-red-50 border-red-300 dark:bg-red-900/20 dark:border-red-700";
+    case "VP Permis BEA":   return isPlaced ? "bg-white/50 dark:bg-gray-800/30 border-green-300/50 border-l-red-300/50 opacity-50" : "bg-white dark:bg-gray-800 border-green-400 border-l-red-400";
+    case "Permis Accéléré": return isPlaced ? "bg-blue-50/60 border-blue-200/50 opacity-50 dark:bg-blue-900/10 dark:border-blue-800/30" : "bg-blue-50 border-blue-300 dark:bg-blue-900/20 dark:border-blue-700";
+    default:                return isPlaced ? "bg-gray-50 border-gray-100 opacity-50" : "bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700";
   }
 }
 function licenseAvatarCls(t: string, isPlaced: boolean) {
-  if (isPlaced) return "bg-gray-200 dark:bg-gray-700 text-gray-400";
   switch(t) {
-    case "Permis B":        return "bg-gray-700 text-white";
-    case "Permis BEA":      return "bg-green-100 dark:bg-green-900/40 text-green-700";
-    case "VP Permis B":     return "bg-red-100 dark:bg-red-900/40 text-red-600";
-    case "VP Permis BEA":   return "bg-gradient-to-br from-red-100 to-green-100 text-gray-700";
-    case "Permis Accéléré": return "bg-blue-100 dark:bg-blue-900/40 text-blue-600";
-    default:                return "bg-blue-100 dark:bg-blue-900/40 text-blue-600";
+    case "Permis B":        return isPlaced ? "bg-gray-700/30 text-gray-500" : "bg-gray-700 text-white";
+    case "Permis BEA":      return isPlaced ? "bg-green-100/50 text-green-600/50" : "bg-green-100 dark:bg-green-900/40 text-green-700";
+    case "VP Permis B":     return isPlaced ? "bg-red-100/50 text-red-500/50" : "bg-red-100 dark:bg-red-900/40 text-red-600";
+    case "VP Permis BEA":   return isPlaced ? "bg-gradient-to-br from-red-100/40 to-green-100/40 text-gray-500/60" : "bg-gradient-to-br from-red-100 to-green-100 text-gray-700";
+    case "Permis Accéléré": return isPlaced ? "bg-blue-100/50 text-blue-500/50" : "bg-blue-100 dark:bg-blue-900/40 text-blue-600";
+    default:                return isPlaced ? "bg-gray-200 text-gray-400" : "bg-blue-100 dark:bg-blue-900/40 text-blue-600";
   }
 }
 function licenseNameCls(t: string, isPlaced: boolean) {
-  if (isPlaced) return "line-through text-gray-400 dark:text-gray-500";
-  return t === "Permis B" ? "text-white" : "text-gray-900 dark:text-gray-100";
+  if (!isPlaced) return t === "Permis B" ? "text-white" : "text-gray-900 dark:text-gray-100";
+  switch(t) {
+    case "Permis B":        return "line-through text-gray-500/70";
+    case "Permis BEA":      return "line-through text-green-700/50";
+    case "VP Permis B":     return "line-through text-red-600/50";
+    case "VP Permis BEA":   return "line-through text-gray-600/50";
+    case "Permis Accéléré": return "line-through text-blue-600/50";
+    default:                return "line-through text-gray-400";
+  }
 }
 function licenseSubCls(t: string, isPlaced: boolean) {
-  if (isPlaced) return "text-gray-400";
+  if (isPlaced) return "text-gray-400/60";
   return t === "Permis B" ? "text-gray-400" : "text-gray-400";
 }
 
@@ -575,9 +580,11 @@ const LICENSE_PRIORITY: Record<string,number> = {"VP Permis B":0,"VP Permis BEA"
                       <p className="text-xs text-gray-400">Aucun élève</p>
                       <button onClick={()=>setModal("queue")} className="text-xs text-blue-500 underline">Ajouter</button>
                     </div>
-                  ):queueStudents.map(s=>{
+                  ):queueStudents.flatMap((s,i)=>{
                     const isPlaced = placedIds.has(s.id);
-                    return (
+                    const prev = queueStudents[i-1];
+                    const showSep = i>0 && (s.licenseType??"Permis B") !== (prev.licenseType??"Permis B");
+                    const card = (
                     <Draggable key={s.id}
                       data={{kind:"student",student:s}}
                       onTap={()=>openFromQueue(s)}
@@ -594,7 +601,9 @@ const LICENSE_PRIORITY: Record<string,number> = {"VP Permis B":0,"VP Permis BEA"
                         <p className={cn("text-[9px] truncate", licenseSubCls(s.licenseType??"Permis B", isPlaced))}>{s.licenseType??"Permis B"} · {drivingDate(s.lastDrivingDate)}</p>
                       </div>
                     </Draggable>
-                  );})}
+                    );
+                    return showSep ? [<hr key={`sep-${i}`} className="border-gray-200/70 dark:border-gray-700/40 my-0.5 -mx-1"/>, card] : [card];
+                  })}
                 </div>
               </div>
 
