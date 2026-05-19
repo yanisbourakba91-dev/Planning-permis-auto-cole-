@@ -459,7 +459,10 @@ export default function CalendrierPage() {
   placements.forEach(p=>{const k=`${p.date.slice(0,10)}:${p.time}`;bySlot.set(k,[...(bySlot.get(k)??[]),p]);});
   const placedIds = new Set(placements.map(p=>p.student.id));
   const queueIds = new Set(weekQueue.map(e=>e.studentId));
-  const queueStudents = students.filter(s=>queueIds.has(s.id));
+const LICENSE_PRIORITY: Record<string,number> = {"VP Permis B":0,"VP Permis BEA":1,"Permis Accéléré":2,"Permis B":3,"Permis BEA":4};
+  const queueStudents = students
+    .filter(s=>queueIds.has(s.id))
+    .sort((a,b)=>(LICENSE_PRIORITY[a.licenseType??""  ]??99)-(LICENSE_PRIORITY[b.licenseType??""]??99));
   const studentOptions = students.map(s=>({value:s.id,label:fullName(s)}));
 
   return (
