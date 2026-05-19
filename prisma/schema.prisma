@@ -57,6 +57,7 @@ model Student {
   drivingHours    Float     @default(0)
   lastDrivingDate DateTime?
   licenseType     String    @default("Permis B")
+  sousMandat      Boolean   @default(false)
   notes           String?
   schoolId        String
   createdAt       DateTime  @default(now())
