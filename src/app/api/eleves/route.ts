@@ -10,6 +10,7 @@ const studentSchema = z.object({
   phone: z.string().optional(),
   drivingHours: z.number().min(0).default(0),
   lastDrivingDate: z.string().optional().nullable(),
+  licenseType: z.string().default("Permis B"),
   notes: z.string().optional(),
 });
 
