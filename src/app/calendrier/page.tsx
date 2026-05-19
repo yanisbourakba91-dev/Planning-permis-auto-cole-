@@ -29,6 +29,8 @@ type DragData = { kind: "student"; student: Student } | { kind: "placement"; pla
 const TIME_SLOTS = ["08:00","08:30","09:00","09:30","10:00","10:30","11:00","11:30","12:00","12:30","13:00","13:30","14:00","14:30","15:00","15:30","16:00","16:30","17:00","17:30","18:00","18:30"];
 const DAYS_SHORT = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
 const MONTH_NAMES = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+const CACHE_MS = 5 * 60_000; // 5 min TTL
+interface CachedWeek { placements:Placement[]; queue:{id:string;studentId:string}[]; monthData:ExamMonthData|null; ts:number; }
 
 function weekStartOf(d: Date): Date {
   const r = new Date(d); const day = r.getDay();
@@ -233,34 +235,81 @@ export default function CalendrierPage() {
   const [formError,    setFormError]    = useState("");
   const [formLoading,  setFormLoading]  = useState(false);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  /* ── Cache ── */
+  const cacheRef = useRef<{students:Student[]|null;studentsTs:number;weeks:Map<string,CachedWeek>}>({students:null,studentsTs:0,weeks:new Map()});
+  const wStartRef = useRef(wStart);  const viewRef  = useRef(view);
+  useEffect(()=>{ wStartRef.current=wStart; },[wStart]);
+  useEffect(()=>{ viewRef.current=view;     },[view]);
+
+  const fetchWeek = useCallback(async (ws:Date, silent=false) => {
+    const wk = dateKey(ws);
+    const isCurrent = ()=> wk===dateKey(wStartRef.current) && viewRef.current==="week";
+    const now = Date.now();
+    const cached = cacheRef.current.weeks.get(wk);
+    const stuFresh = !!cacheRef.current.students && (now - cacheRef.current.studentsTs < CACHE_MS);
+    const cacheHit = !!(cached && (now - cached.ts) < CACHE_MS);
+
+    if (isCurrent()) {
+      if (cacheHit) { setPlacements(cached!.placements); setWeekQueue(cached!.queue); setMonthData(cached!.monthData); }
+      if (stuFresh)  setStudents(cacheRef.current.students!);
+      if (cacheHit && stuFresh) { setLoading(false); return; }
+      if (!silent && !cacheHit) setLoading(true);
+    }
+
     try {
-      const days = weekDays(wStart);
+      const days = weekDays(ws);
       const uniqMonths = [...new Map(days.map(d=>[`${d.getFullYear()}-${d.getMonth()+1}`,{year:d.getFullYear(),month:d.getMonth()+1}])).values()];
-      const ay = view==="week"?wStart.getFullYear():curYear;
-      const am = view==="week"?wStart.getMonth()+1:curMonth;
-      const placeFetches = view==="week"
-        ? uniqMonths.map(({year,month})=>fetch(`/api/placements?year=${year}&month=${month}`).then(r=>r.json()))
-        : [fetch(`/api/placements?year=${curYear}&month=${curMonth}`).then(r=>r.json())];
       const [stuData, allMonths, queueData, ...pArrays] = await Promise.all([
-        fetch("/api/eleves").then(r=>r.json()),
-        fetch(`/api/places-examen?year=${ay}`).then(r=>r.json()),
-        view==="week"?fetch(`/api/queue?weekStart=${dateKey(wStart)}`).then(r=>r.json()):Promise.resolve([]),
-        ...placeFetches,
+        stuFresh ? Promise.resolve(null) : fetch("/api/eleves").then(r=>r.json()),
+        fetch(`/api/places-examen?year=${ws.getFullYear()}`).then(r=>r.json()),
+        fetch(`/api/queue?weekStart=${wk}`).then(r=>r.json()),
+        ...uniqMonths.map(({year,month})=>fetch(`/api/placements?year=${year}&month=${month}`).then(r=>r.json())),
       ]);
       const all=(pArrays.flat() as unknown[]).filter((p):p is Placement=>!!p&&typeof p==="object"&&"id"in(p as object));
-      setPlacements(all); setStudents(Array.isArray(stuData)?stuData:[]);
-      setWeekQueue(Array.isArray(queueData)?queueData:[]);
-      setMonthData(Array.isArray(allMonths)?(allMonths as ExamMonthData[]).find(m=>m.month===am&&m.year===ay)??null:null);
-    } catch{/*silent*/} finally{setLoading(false);}
-  },[wStart,curYear,curMonth,view]);
+      const students=stuFresh?cacheRef.current.students!:(Array.isArray(stuData)?stuData:[]);
+      const monthD=Array.isArray(allMonths)?(allMonths as ExamMonthData[]).find(m=>m.month===ws.getMonth()+1&&m.year===ws.getFullYear())??null:null;
+      const queue=Array.isArray(queueData)?queueData:[];
+      if(!stuFresh&&Array.isArray(stuData)){cacheRef.current.students=stuData;cacheRef.current.studentsTs=Date.now();}
+      cacheRef.current.weeks.set(wk,{placements:all,queue,monthData:monthD,ts:Date.now()});
+      if(isCurrent()){setPlacements(all);setStudents(students);setWeekQueue(queue);setMonthData(monthD);}
+    }catch{/*silent*/}finally{if(isCurrent())setLoading(false);}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+
+  const fetchMonth = useCallback(async () => {
+    setLoading(true);
+    try {
+      const stuFresh=!!cacheRef.current.students&&(Date.now()-cacheRef.current.studentsTs<CACHE_MS);
+      const [stuData,allMonths,pData]=await Promise.all([
+        stuFresh?Promise.resolve(null):fetch("/api/eleves").then(r=>r.json()),
+        fetch(`/api/places-examen?year=${curYear}`).then(r=>r.json()),
+        fetch(`/api/placements?year=${curYear}&month=${curMonth}`).then(r=>r.json()),
+      ]);
+      if(!stuFresh&&Array.isArray(stuData)){cacheRef.current.students=stuData;cacheRef.current.studentsTs=Date.now();}
+      const all=(Array.isArray(pData)?pData:[]).filter((p:unknown):p is Placement=>!!p&&typeof p==="object"&&"id"in(p as object));
+      const monthD=Array.isArray(allMonths)?(allMonths as ExamMonthData[]).find(m=>m.month===curMonth&&m.year===curYear)??null:null;
+      setPlacements(all);setStudents(cacheRef.current.students??[]);setWeekQueue([]);setMonthData(monthD);
+    }catch{/*silent*/}finally{setLoading(false);}
+  },[curYear,curMonth]);
+
+  const fetchData = useCallback(()=>{ if(view==="week") fetchWeek(wStart); else fetchMonth(); },[view,wStart,fetchWeek,fetchMonth]);
   useEffect(()=>{fetchData();},[fetchData]);
+
+  /* Précharge les semaines adjacentes en arrière-plan */
+  useEffect(()=>{
+    if(view!=="week")return;
+    const t=setTimeout(()=>{ fetchWeek(shiftWeek(wStart,1),true); fetchWeek(shiftWeek(wStart,-1),true); },700);
+    return()=>clearTimeout(t);
+  },[wStart,view,fetchWeek]);
 
   async function saveMonthlyTotal(v: number) {
     const ay=view==="week"?wStart.getFullYear():curYear, am=view==="week"?wStart.getMonth()+1:curMonth;
     const res=await fetch("/api/places-examen",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({year:ay,month:am,totalSlots:v})});
-    if(res.ok) setMonthData(await res.json());
+    if(res.ok){
+      const updated=await res.json();
+      setMonthData(updated);
+      if(view==="week"){const c=cacheRef.current.weeks.get(dateKey(wStart));if(c)cacheRef.current.weeks.set(dateKey(wStart),{...c,monthData:updated});}
+    }
   }
 
   /* ── Drag callbacks (updated each render) ── */
@@ -322,7 +371,12 @@ export default function CalendrierPage() {
     try{
       const res=await fetch("/api/placements",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(pForm)});
       const data=await res.json(); if(!res.ok){setFormError(data.error||"Erreur");return;}
-      closeModal();fetchData();
+      if(data?.id){
+        setPlacements(prev=>[...prev.filter(x=>x.student.id!==data.student.id),data]);
+        const wk=dateKey(wStart);const c=cacheRef.current.weeks.get(wk);
+        if(c)cacheRef.current.weeks.set(wk,{...c,placements:[...c.placements.filter(x=>x.student.id!==data.student.id),data]});
+      }
+      closeModal();
     }catch{setFormError("Erreur serveur");}finally{setFormLoading(false);}
   }
   async function submitStudent(e:React.FormEvent){
@@ -332,14 +386,23 @@ export default function CalendrierPage() {
     try{
       const res=await fetch("/api/eleves",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...sForm,drivingHours:parseFloat(sForm.drivingHours)||0,lastDrivingDate:sForm.lastDrivingDate||null,email:sForm.email||undefined})});
       const data=await res.json(); if(!res.ok){setFormError(data.error||"Erreur");return;}
-      await fetch("/api/queue",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({studentId:data.id,weekStart:dateKey(wStart)})});
-      closeModal();setSForm({firstName:"",lastName:"",email:"",phone:"",drivingHours:"0",lastDrivingDate:""});fetchData();
+      const qRes=await fetch("/api/queue",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({studentId:data.id,weekStart:dateKey(wStart)})});
+      const qEntry=await qRes.json();
+      setStudents(prev=>[...prev,data]);
+      if(qEntry?.id) setWeekQueue(prev=>[...prev,qEntry]);
+      if(cacheRef.current.students) cacheRef.current.students=[...cacheRef.current.students,data];
+      closeModal();setSForm({firstName:"",lastName:"",email:"",phone:"",drivingHours:"0",lastDrivingDate:""});
     }catch{setFormError("Erreur serveur");}finally{setFormLoading(false);}
   }
   async function deletePlacement(id:string){
     setFormLoading(true);
-    try{await fetch(`/api/placements/${id}`,{method:"DELETE"});closeModal();fetchData();}
-    catch{setFormError("Erreur serveur");}finally{setFormLoading(false);}
+    try{
+      await fetch(`/api/placements/${id}`,{method:"DELETE"});
+      setPlacements(prev=>prev.filter(x=>x.id!==id));
+      const wk=dateKey(wStart);const c=cacheRef.current.weeks.get(wk);
+      if(c)cacheRef.current.weeks.set(wk,{...c,placements:c.placements.filter(x=>x.id!==id)});
+      closeModal();
+    }catch{setFormError("Erreur serveur");}finally{setFormLoading(false);}
   }
 
   const days = weekDays(wStart);
