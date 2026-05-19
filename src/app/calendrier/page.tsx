@@ -33,7 +33,7 @@ const MONTH_NAMES = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet",
 const CACHE_MS = 5 * 60_000; // 5 min TTL
 interface CachedWeek { placements:Placement[]; queue:{id:string;studentId:string}[]; monthData:ExamMonthData|null; ts:number; }
 
-const LICENSE_TYPES = ["Permis B","Permis BEA","VP Permis B","VP Permis BEA","Permis Accéléré"] as const;
+const LICENSE_TYPES = ["Permis B","Permis BEA","VP Permis B","VP Permis BEA","Permis Accéléré","Élève tampon"] as const;
 
 function licenseCardCls(t: string, isPlaced: boolean) {
   switch(t) {
@@ -42,6 +42,7 @@ function licenseCardCls(t: string, isPlaced: boolean) {
     case "VP Permis B":     return isPlaced ? "bg-red-50/60 border-red-200/50 opacity-50 dark:bg-red-900/10 dark:border-red-800/30" : "bg-red-50 border-red-300 dark:bg-red-900/20 dark:border-red-700";
     case "VP Permis BEA":   return isPlaced ? "bg-white/50 dark:bg-gray-800/30 border-green-300/50 border-l-red-300/50 opacity-50" : "bg-white dark:bg-gray-800 border-green-400 border-l-red-400";
     case "Permis Accéléré": return isPlaced ? "bg-blue-50/60 border-blue-200/50 opacity-50 dark:bg-blue-900/10 dark:border-blue-800/30" : "bg-blue-50 border-blue-300 dark:bg-blue-900/20 dark:border-blue-700";
+    case "Élève tampon":    return isPlaced ? "bg-black/5 border-gray-400/30 opacity-50" : "bg-black/10 dark:bg-white/5 border-gray-500 dark:border-gray-500 border-dashed";
     default:                return isPlaced ? "bg-gray-50 border-gray-100 opacity-50" : "bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700";
   }
 }
@@ -52,6 +53,7 @@ function licenseAvatarCls(t: string, isPlaced: boolean) {
     case "VP Permis B":     return isPlaced ? "bg-red-100/50 text-red-500/50" : "bg-red-100 dark:bg-red-900/40 text-red-600";
     case "VP Permis BEA":   return isPlaced ? "bg-gradient-to-br from-red-100/40 to-green-100/40 text-gray-500/60" : "bg-gradient-to-br from-red-100 to-green-100 text-gray-700";
     case "Permis Accéléré": return isPlaced ? "bg-blue-100/50 text-blue-500/50" : "bg-blue-100 dark:bg-blue-900/40 text-blue-600";
+    case "Élève tampon":    return isPlaced ? "bg-gray-400/20 text-gray-400/50" : "bg-gray-800/20 dark:bg-white/10 text-gray-600 dark:text-gray-400";
     default:                return isPlaced ? "bg-gray-200 text-gray-400" : "bg-blue-100 dark:bg-blue-900/40 text-blue-600";
   }
 }
@@ -63,6 +65,7 @@ function licenseNameCls(t: string, isPlaced: boolean) {
     case "VP Permis B":     return "line-through text-red-600/50";
     case "VP Permis BEA":   return "line-through text-gray-600/50";
     case "Permis Accéléré": return "line-through text-blue-600/50";
+    case "Élève tampon":    return "line-through text-gray-500/50";
     default:                return "line-through text-gray-400";
   }
 }
@@ -464,7 +467,7 @@ export default function CalendrierPage() {
   placements.forEach(p=>{const k=`${p.date.slice(0,10)}:${p.time}`;bySlot.set(k,[...(bySlot.get(k)??[]),p]);});
   const placedIds = new Set(placements.map(p=>p.student.id));
   const queueIds = new Set(weekQueue.map(e=>e.studentId));
-const LICENSE_PRIORITY: Record<string,number> = {"VP Permis B":0,"VP Permis BEA":1,"Permis Accéléré":2,"Permis B":3,"Permis BEA":4};
+const LICENSE_PRIORITY: Record<string,number> = {"VP Permis B":0,"VP Permis BEA":1,"Permis Accéléré":2,"Permis B":3,"Permis BEA":4,"Élève tampon":5};
   const queueStudents = students
     .filter(s=>queueIds.has(s.id))
     .sort((a,b)=>(LICENSE_PRIORITY[a.licenseType??""  ]??99)-(LICENSE_PRIORITY[b.licenseType??""]??99));
@@ -602,7 +605,7 @@ const LICENSE_PRIORITY: Record<string,number> = {"VP Permis B":0,"VP Permis BEA"
                       </div>
                     </Draggable>
                     );
-                    return showSep ? [<hr key={`sep-${i}`} className="border-gray-200/70 dark:border-gray-700/40 my-0.5 -mx-1"/>, card] : [card];
+                    return showSep ? [<div key={`sep-${i}`} className="h-2.5 flex items-center -mx-2 px-2"><div className="h-px w-full bg-gray-200/90 dark:bg-gray-700/60"/></div>, card] : [card];
                   })}
                 </div>
               </div>
