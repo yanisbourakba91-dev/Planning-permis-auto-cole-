@@ -318,7 +318,7 @@ export default function CalendrierPage() {
     try{
       const res=await fetch("/api/eleves",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...sForm,drivingHours:parseFloat(sForm.drivingHours)||0,lastDrivingDate:sForm.lastDrivingDate||null,email:sForm.email||undefined})});
       const data=await res.json(); if(!res.ok){setFormError(data.error||"Erreur");return;}
-      setModal("queue");setSForm({firstName:"",lastName:"",email:"",phone:"",drivingHours:"0",lastDrivingDate:""});fetchData();
+      closeModal();setSForm({firstName:"",lastName:"",email:"",phone:"",drivingHours:"0",lastDrivingDate:""});fetchData();
     }catch{setFormError("Erreur serveur");}finally{setFormLoading(false);}
   }
   async function deletePlacement(id:string){
