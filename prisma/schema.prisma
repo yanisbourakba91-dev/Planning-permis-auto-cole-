@@ -45,6 +45,7 @@ model School {
   students    Student[]
   placements  ExamPlacement[]
   examMonths  ExamMonth[]
+  weekQueues  WeekQueue[]
 }
 
 model Student {
@@ -62,6 +63,20 @@ model Student {
 
   school          School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   placements      ExamPlacement[]
+  weekQueues      WeekQueue[]
+}
+
+model WeekQueue {
+  id        String   @id @default(cuid())
+  weekStart DateTime
+  studentId String
+  schoolId  String
+  createdAt DateTime @default(now())
+
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, weekStart, studentId])
 }
 
 model ExamPlacement {
