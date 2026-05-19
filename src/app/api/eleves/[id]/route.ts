@@ -10,6 +10,8 @@ const updateSchema = z.object({
   phone: z.string().optional().nullable(),
   drivingHours: z.number().min(0).optional(),
   lastDrivingDate: z.string().optional().nullable(),
+  licenseType: z.string().optional(),
+  sousMandat: z.boolean().optional(),
   notes: z.string().optional().nullable(),
 });
 

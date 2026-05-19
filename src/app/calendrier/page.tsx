@@ -22,7 +22,7 @@ interface Placement {
 interface Student {
   id: string; firstName: string; lastName: string;
   drivingHours: number; lastDrivingDate: string | null;
-  licenseType: string;
+  licenseType: string; sousMandat: boolean;
 }
 interface ExamMonthData { year: number; month: number; totalSlots: number; usedSlots: number; }
 type DragData = { kind: "student"; student: Student } | { kind: "placement"; placement: Placement };
@@ -268,12 +268,14 @@ export default function CalendrierPage() {
   });
 
   /* Modals */
-  type ModalKind = "add"|"detail"|"queue"|"newStudent"|null;
+  type ModalKind = "add"|"detail"|"queue"|"newStudent"|"editStudent"|null;
   const [modal,        setModal]        = useState<ModalKind>(null);
   const [selPlacement, setSelPlacement] = useState<Placement|null>(null);
   const [queueStu,     setQueueStu]     = useState<Student|null>(null);
+  const [editStu,      setEditStu]      = useState<Student|null>(null);
   const [pForm,        setPForm]        = useState({studentId:"",date:"",time:"09:00",instructor:"",examCenter:"",notes:""});
-  const [sForm,        setSForm]        = useState({firstName:"",lastName:"",email:"",phone:"",licenseType:"Permis B",lastDrivingDate:""});
+  const [sForm,        setSForm]        = useState({firstName:"",lastName:"",email:"",phone:"",licenseType:"Permis B",lastDrivingDate:"",sousMandat:false});
+  const [eForm,        setEForm]        = useState({lastName:"",licenseType:"Permis B",lastDrivingDate:"",sousMandat:false});
   const [formError,    setFormError]    = useState("");
   const [formLoading,  setFormLoading]  = useState(false);
 
@@ -405,7 +407,13 @@ export default function CalendrierPage() {
   function openFromSlot(d:string,t:string){setQueueStu(null);setPForm({studentId:"",date:d,time:t,instructor:"",examCenter:"",notes:""});setFormError("");setModal("add");}
   function openFromQueue(s:Student){setQueueStu(s);setPForm({studentId:s.id,date:"",time:"09:00",instructor:"",examCenter:"",notes:""});setFormError("");setModal("add");}
   function openDetail(p:Placement){setSelPlacement(p);setModal("detail");}
-  function closeModal(){setModal(null);setSelPlacement(null);setQueueStu(null);setFormError("");}
+  function closeModal(){setModal(null);setSelPlacement(null);setQueueStu(null);setEditStu(null);setFormError("");}
+  function openEditStudent(s:Student){
+    setEditStu(s);
+    const d=s.lastDrivingDate?new Date(s.lastDrivingDate).toISOString().slice(0,10):"";
+    setEForm({lastName:fullName(s),licenseType:s.licenseType??"Permis B",lastDrivingDate:d,sousMandat:s.sousMandat??false});
+    setFormError("");setModal("editStudent");
+  }
 
   async function addToWeekQueue(s:Student){
     const ws=dateKey(wStart);
@@ -445,7 +453,30 @@ export default function CalendrierPage() {
       setStudents(prev=>[...prev,data]);
       if(qEntry?.id) setWeekQueue(prev=>[...prev,qEntry]);
       if(cacheRef.current.students) cacheRef.current.students=[...cacheRef.current.students,data];
-      closeModal();setSForm({firstName:"",lastName:"",email:"",phone:"",licenseType:"Permis B",lastDrivingDate:""});
+      closeModal();setSForm({firstName:"",lastName:"",email:"",phone:"",licenseType:"Permis B",lastDrivingDate:"",sousMandat:false});
+    }catch{setFormError("Erreur serveur");}finally{setFormLoading(false);}
+  }
+  async function saveStudent(e:React.FormEvent){
+    e.preventDefault();
+    if(!editStu||!eForm.lastName.trim()){setFormError("Le nom est requis");return;}
+    setFormLoading(true);setFormError("");
+    try{
+      const res=await fetch(`/api/eleves/${editStu.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({lastName:eForm.lastName,licenseType:eForm.licenseType,lastDrivingDate:eForm.lastDrivingDate||null,sousMandat:eForm.sousMandat})});
+      const data=await res.json(); if(!res.ok){setFormError(data.error||"Erreur");return;}
+      const updated:Student={...editStu,...data};
+      setStudents(prev=>prev.map(s=>s.id===editStu.id?updated:s));
+      if(cacheRef.current.students) cacheRef.current.students=cacheRef.current.students.map(s=>s.id===editStu.id?updated:s);
+      closeModal();
+    }catch{setFormError("Erreur serveur");}finally{setFormLoading(false);}
+  }
+  async function deleteStudent(id:string){
+    setFormLoading(true);
+    try{
+      await fetch(`/api/eleves/${id}`,{method:"DELETE"});
+      setStudents(prev=>prev.filter(s=>s.id!==id));
+      setWeekQueue(prev=>prev.filter(e=>e.studentId!==id));
+      if(cacheRef.current.students) cacheRef.current.students=cacheRef.current.students.filter(s=>s.id!==id);
+      closeModal();
     }catch{setFormError("Erreur serveur");}finally{setFormLoading(false);}
   }
   async function deletePlacement(id:string){
@@ -590,7 +621,7 @@ const LICENSE_PRIORITY: Record<string,number> = {"VP Permis B":0,"VP Permis BEA"
                     const card = (
                     <Draggable key={s.id}
                       data={{kind:"student",student:s}}
-                      onTap={()=>openFromQueue(s)}
+                      onTap={()=>openEditStudent(s)}
                       cbs={dragCbs}
                       className={cn("rounded-xl border flex items-center gap-2 px-2 py-1.5 select-none transition-opacity",
                         licenseCardCls(s.licenseType??"Permis B", isPlaced)
@@ -600,7 +631,10 @@ const LICENSE_PRIORITY: Record<string,number> = {"VP Permis B":0,"VP Permis BEA"
                         licenseAvatarCls(s.licenseType??"Permis B", isPlaced)
                       )}>{initials(s)}</div>
                       <div className="min-w-0 flex-1 leading-tight">
-                        <p className={cn("text-[11px] font-semibold truncate", licenseNameCls(s.licenseType??"Permis B", isPlaced))}>{fullName(s)}</p>
+                        <p className={cn("text-[11px] font-semibold truncate flex items-center gap-1", licenseNameCls(s.licenseType??"Permis B", isPlaced))}>
+                          {s.sousMandat&&<span className="inline-block w-[3px] h-3 rounded-full bg-red-500 flex-shrink-0"/>}
+                          {fullName(s)}
+                        </p>
                         <p className={cn("text-[9px] truncate", licenseSubCls(s.licenseType??"Permis B", isPlaced))}>{s.licenseType??"Permis B"} · {drivingDate(s.lastDrivingDate)}</p>
                       </div>
                     </Draggable>
@@ -715,12 +749,51 @@ const LICENSE_PRIORITY: Record<string,number> = {"VP Permis B":0,"VP Permis BEA"
           <Select label="Type de permis" value={sForm.licenseType} onChange={e=>setSForm(f=>({...f,licenseType:e.target.value}))}>
             {LICENSE_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
           </Select>
+          <label className="flex items-center gap-3 cursor-pointer select-none py-1">
+            <div className="relative">
+              <input type="checkbox" className="sr-only peer" checked={sForm.sousMandat} onChange={e=>setSForm(f=>({...f,sousMandat:e.target.checked}))}/>
+              <div className="h-5 w-5 rounded border-2 border-gray-300 peer-checked:bg-red-500 peer-checked:border-red-500 transition-colors flex items-center justify-center">
+                {sForm.sousMandat&&<svg className="h-3 w-3 text-white" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+              </div>
+            </div>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Sous mandat</span>
+          </label>
           {formError&&<p className="text-sm text-red-500">{formError}</p>}
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={()=>setModal("queue")} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">Retour</button>
             <button type="submit" disabled={formLoading} className="flex-1 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 disabled:opacity-50 transition-colors">{formLoading?"Création...":"Créer l'élève"}</button>
           </div>
         </form>
+      </Modal>
+
+      <Modal open={modal==="editStudent"} onClose={closeModal} title="Modifier l'élève">
+        {editStu&&(
+          <form onSubmit={saveStudent} className="space-y-3 mt-2">
+            <Input label="Nom et prénom *" placeholder="Jean Dupont" value={eForm.lastName} onChange={e=>setEForm(f=>({...f,lastName:e.target.value}))} required/>
+            <Input label="Dernière date de conduite" type="date" value={eForm.lastDrivingDate} onChange={e=>setEForm(f=>({...f,lastDrivingDate:e.target.value}))}/>
+            <Select label="Type de permis" value={eForm.licenseType} onChange={e=>setEForm(f=>({...f,licenseType:e.target.value}))}>
+              {LICENSE_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+            </Select>
+            <label className="flex items-center gap-3 cursor-pointer select-none py-1">
+              <div className="relative">
+                <input type="checkbox" className="sr-only peer" checked={eForm.sousMandat} onChange={e=>setEForm(f=>({...f,sousMandat:e.target.checked}))}/>
+                <div className="h-5 w-5 rounded border-2 border-gray-300 peer-checked:bg-red-500 peer-checked:border-red-500 transition-colors flex items-center justify-center">
+                  {eForm.sousMandat&&<svg className="h-3 w-3 text-white" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                </div>
+              </div>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Sous mandat</span>
+              {eForm.sousMandat&&<span className="inline-block w-[3px] h-3.5 rounded-full bg-red-500"/>}
+            </label>
+            {formError&&<p className="text-sm text-red-500">{formError}</p>}
+            <div className="flex gap-3 pt-1">
+              <button type="button" onClick={()=>deleteStudent(editStu.id)} disabled={formLoading} className="py-2.5 px-4 rounded-xl border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 disabled:opacity-50 transition-colors">
+                <Trash2 className="h-4 w-4"/>
+              </button>
+              <button type="button" onClick={closeModal} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">Annuler</button>
+              <button type="submit" disabled={formLoading} className="flex-1 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 disabled:opacity-50 transition-colors">{formLoading?"Enregistrement...":"Enregistrer"}</button>
+            </div>
+          </form>
+        )}
       </Modal>
 
       <DebugPanel />
